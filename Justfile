@@ -1,3 +1,5 @@
+akash_dir := "just-akash"
+
 # ── Lifecycle ────────────────────────────────────────
 
 # Start a new Akash instance (SSH-enabled, key-auth only)

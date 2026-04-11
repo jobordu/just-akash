@@ -74,19 +74,16 @@ def deploy(
 
     providers_env = os.environ.get("AKASH_PROVIDERS", "")
     allowed = [a.strip() for a in providers_env.split(",") if a.strip()]
-    if not allowed:
-        raise RuntimeError(
-            "AKASH_PROVIDERS environment variable not set. "
-            "Set it to a comma-separated list of allowed provider addresses.\n"
-            "Example: AKASH_PROVIDERS=akash1abc...,akash1def..."
-        )
 
     _log(
         logging.INFO,
         f"CONFIG  sdl={sdl_path}  gpu={gpu}  image={image or '(default)'}  "
         f"wait_timeout={wait_timeout}s",
     )
-    _log(logging.INFO, f"ALLOWED_PROVIDERS ({len(allowed)}): {allowed}")
+    if allowed:
+        _log(logging.INFO, f"ALLOWED_PROVIDERS ({len(allowed)}): {allowed}")
+    else:
+        _log(logging.INFO, "ALLOWED_PROVIDERS: (any — no allowlist set)")
 
     # Step 1: Read SDL file
     _log(logging.INFO, f"STEP 1: Reading SDL from {sdl_path}")
@@ -151,10 +148,16 @@ def deploy(
     )
 
     # Step 3: Poll for bids — wait for ALL allowed providers to bid (or timeout)
-    _log(
-        logging.INFO,
-        f"STEP 3: Polling for bids (timeout={wait_timeout}s, interval=5s, waiting for all {len(allowed)} allowed providers)...",
-    )
+    if allowed:
+        _log(
+            logging.INFO,
+            f"STEP 3: Polling for bids (timeout={wait_timeout}s, interval=5s, waiting for all {len(allowed)} allowed providers)...",
+        )
+    else:
+        _log(
+            logging.INFO,
+            f"STEP 3: Polling for bids (timeout={wait_timeout}s, interval=5s, accepting any provider)...",
+        )
     start_time = time.time()
     bids = []
     poll_count = 0
@@ -176,10 +179,6 @@ def deploy(
             time.sleep(5)
             continue
 
-        bidding_providers = {_extract_provider(b) for b in bids if _extract_provider(b)}
-        still_waiting = [p for p in allowed if p not in bidding_providers]
-        all_allowed_bid = len(still_waiting) == 0
-
         if current_count != last_bid_count:
             last_bid_count = current_count
             if current_count == 0:
@@ -192,25 +191,34 @@ def deploy(
                 for i, b in enumerate(bids):
                     p = _extract_provider(b) or "unknown"
                     s = b.get("state", b.get("bid", {}).get("state", "?"))
-                    in_allowlist = "ALLOWED" if p in allowed else "FOREIGN"
+                    if allowed:
+                        in_allowlist = "ALLOWED" if p in allowed else "FOREIGN"
+                    else:
+                        in_allowlist = "ACCEPTED"
                     _log(
                         logging.INFO,
                         f"    bid[{i}] provider={p}  price={_fmt_price(b)}  state={s}  [{in_allowlist}]",
                     )
 
-        if current_count > 0:
-            if all_allowed_bid:
-                _log(
-                    logging.INFO,
-                    f"  All {len(allowed)} allowed provider(s) have bid — proceeding to selection",
-                )
-                break
-            else:
+        if current_count > 0 and allowed:
+            bidding_providers = {
+                _extract_provider(b) for b in bids if _extract_provider(b)
+            }
+            still_waiting = [p for p in allowed if p not in bidding_providers]
+            if still_waiting:
                 print(
                     f"\r  Waiting for bids... {elapsed}s — still waiting for {len(still_waiting)} provider(s)",
                     end="",
                     flush=True,
                 )
+            else:
+                _log(
+                    logging.INFO,
+                    f"  All {len(allowed)} allowed provider(s) have bid — proceeding to selection",
+                )
+                break
+        elif current_count > 0 and not allowed:
+            break
         else:
             print(
                 f"\r  Waiting for bids... {elapsed}s (poll #{poll_count})",
@@ -243,54 +251,63 @@ def deploy(
     )
     _log_bid_table(bids, "ALL BIDS")
 
-    bidding_providers = {_extract_provider(b) for b in bids if _extract_provider(b)}
-    no_bid_from = [p for p in allowed if p not in bidding_providers]
-    if no_bid_from:
-        _log(logging.WARNING, f"NO BID FROM {len(no_bid_from)} allowed provider(s):")
-        for p in no_bid_from:
-            _log(logging.WARNING, f"  {p}")
-            try:
-                prov_info = client.get_provider(p)
-                if prov_info:
-                    online = prov_info.get("isOnline")
-                    valid = prov_info.get("isValidVersion")
-                    uptime = prov_info.get("uptime1d")
-                    stats = prov_info.get("stats", {})
-                    cpu = stats.get("cpu", {})
-                    mem = stats.get("memory", {})
-                    _log(
-                        logging.WARNING,
-                        f"    on-chain status: isOnline={online} isValidVersion={valid} "
-                        f"uptime1d={uptime} cpu_avail={cpu.get('available')} cpu_active={cpu.get('active')} "
-                        f"mem_avail={mem.get('available')} mem_active={mem.get('active')}",
-                    )
-                else:
-                    _log(
-                        logging.WARNING,
-                        f"    on-chain status: NOT FOUND in provider registry",
-                    )
-            except RuntimeError as e:
-                _log(logging.WARNING, f"    on-chain status: query failed: {e}")
+    if allowed:
+        bidding_providers = {_extract_provider(b) for b in bids if _extract_provider(b)}
+        no_bid_from = [p for p in allowed if p not in bidding_providers]
+        if no_bid_from:
+            _log(
+                logging.WARNING, f"NO BID FROM {len(no_bid_from)} allowed provider(s):"
+            )
+            for p in no_bid_from:
+                _log(logging.WARNING, f"  {p}")
+                try:
+                    prov_info = client.get_provider(p)
+                    if prov_info:
+                        online = prov_info.get("isOnline")
+                        valid = prov_info.get("isValidVersion")
+                        uptime = prov_info.get("uptime1d")
+                        stats = prov_info.get("stats", {})
+                        cpu = stats.get("cpu", {})
+                        mem = stats.get("memory", {})
+                        _log(
+                            logging.WARNING,
+                            f"    on-chain status: isOnline={online} isValidVersion={valid} "
+                            f"uptime1d={uptime} cpu_avail={cpu.get('available')} cpu_active={cpu.get('active')} "
+                            f"mem_avail={mem.get('available')} mem_active={mem.get('active')}",
+                        )
+                    else:
+                        _log(
+                            logging.WARNING,
+                            "    on-chain status: NOT FOUND in provider registry",
+                        )
+                except RuntimeError as e:
+                    _log(logging.WARNING, f"    on-chain status: query failed: {e}")
 
     # Step 4: Filter bids to allowed providers
-    _log(logging.INFO, "STEP 4: Filtering bids to allowed providers...")
-    our_bids = [b for b in bids if _extract_provider(b) in allowed]
-    foreign_bids = [b for b in bids if _extract_provider(b) not in allowed]
+    _log(logging.INFO, "STEP 4: Filtering bids...")
+    if allowed:
+        our_bids = [b for b in bids if _extract_provider(b) in allowed]
+        foreign_bids = [b for b in bids if _extract_provider(b) not in allowed]
 
-    _log_bid_table(our_bids, "ALLOWED PROVIDERS")
-    _log_bid_table(foreign_bids, "FOREIGN (rejected)")
+        _log_bid_table(our_bids, "ALLOWED PROVIDERS")
+        _log_bid_table(foreign_bids, "FOREIGN (rejected)")
 
-    if not our_bids:
-        foreign = [_extract_provider(b) or "unknown" for b in bids]
-        _log(logging.ERROR, f"All {len(bids)} bid(s) are from non-allowed providers")
-        _log(logging.ERROR, f"  Allowed: {allowed}")
-        _log(logging.ERROR, f"  Received from: {foreign}")
-        raise RuntimeError(
-            f"Received {len(bids)} bid(s) but NONE from our providers.\n"
-            f"  Allowed: {allowed}\n"
-            f"  Received from: {foreign}\n"
-            "Check that your providers are online and have capacity."
-        )
+        if not our_bids:
+            foreign = [_extract_provider(b) or "unknown" for b in bids]
+            _log(
+                logging.ERROR, f"All {len(bids)} bid(s) are from non-allowed providers"
+            )
+            _log(logging.ERROR, f"  Allowed: {allowed}")
+            _log(logging.ERROR, f"  Received from: {foreign}")
+            raise RuntimeError(
+                f"Received {len(bids)} bid(s) but NONE from our providers.\n"
+                f"  Allowed: {allowed}\n"
+                f"  Received from: {foreign}\n"
+                "Check that your providers are online and have capacity."
+            )
+    else:
+        our_bids = bids
+        _log_bid_table(our_bids, "ALL BIDS (no allowlist)")
 
     # Step 5: Select cheapest bid
     _log(logging.INFO, "STEP 5: Selecting cheapest bid from allowed providers...")
