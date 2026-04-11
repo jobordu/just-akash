@@ -1,12 +1,3 @@
-set dotenv-load
-set positional-arguments
-
-log_dir := ".logs/just"
-
-# Default recipe: list available targets
-default:
-    @just --list --unsorted
-
 # ── Lifecycle ────────────────────────────────────────
 
 # Start a new Akash instance (SSH-enabled, key-auth only)
