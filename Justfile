@@ -32,7 +32,7 @@ connect dseq="":
     echo "[INFO] recipe=connect started_at=$(date -u +"%Y-%m-%dT%H:%M:%SZ") cwd=$PWD log_file=$log_file dseq={{dseq}}"
     set -x
     if [ -n "{{dseq}}" ]; then
-        python3 {{akash_dir}}/scripts/akash_api.py connect --dseq {{dseq}}
+        python3 {{akash_dir}}/scripts/akash_api.py connect --dseq={{dseq}}
     else
         python3 {{akash_dir}}/scripts/akash_api.py connect
     fi
@@ -49,7 +49,7 @@ down dseq="":
     echo "[INFO] recipe=down started_at=$(date -u +"%Y-%m-%dT%H:%M:%SZ") cwd=$PWD log_file=$log_file dseq={{dseq}}"
     set -x
     if [ -n "{{dseq}}" ]; then
-        python3 {{akash_dir}}/scripts/akash_api.py close --dseq {{dseq}}
+        python3 {{akash_dir}}/scripts/akash_api.py close --dseq={{dseq}}
     else
         python3 {{akash_dir}}/scripts/akash_api.py close
     fi
@@ -79,7 +79,7 @@ tag dseq name:
     trap 'status=$?; echo "[INFO] recipe=tag finished_at=$(date -u +"%Y-%m-%dT%H:%M:%SZ") exit_code=${status} log_file=${log_file}"' EXIT
     echo "[INFO] recipe=tag started_at=$(date -u +"%Y-%m-%dT%H:%M:%SZ") cwd=$PWD log_file=$log_file dseq={{dseq}} name={{name}}"
     set -x
-    python3 {{akash_dir}}/scripts/akash_api.py tag --dseq {{dseq}} --name "{{name}}"
+    python3 {{akash_dir}}/scripts/akash_api.py tag --dseq={{dseq}} --name "{{name}}"
 
 # ── Info ─────────────────────────────────────────────
 
@@ -108,7 +108,7 @@ status dseq="":
     echo "[INFO] recipe=status started_at=$(date -u +"%Y-%m-%dT%H:%M:%SZ") cwd=$PWD log_file=$log_file dseq={{dseq}}"
     set -x
     if [ -n "{{dseq}}" ]; then
-        python3 {{akash_dir}}/scripts/akash_api.py status --dseq {{dseq}}
+        python3 {{akash_dir}}/scripts/akash_api.py status --dseq={{dseq}}
     else
         python3 {{akash_dir}}/scripts/akash_api.py status
     fi
