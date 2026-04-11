@@ -14,10 +14,10 @@ up tag="":
     trap 'status=$?; echo "[INFO] recipe=up finished_at=$(date -u +"%Y-%m-%dT%H:%M:%SZ") exit_code=${status} log_file=${log_file}"' EXIT
     echo "[INFO] recipe=up started_at=$(date -u +"%Y-%m-%dT%H:%M:%SZ") cwd=$PWD log_file=$log_file tag={{tag}}"
     set -x
-    python3 -u scripts/deploy.py --sdl sdl/cpu-backtest-ssh.yaml --wait-timeout 180 | tee /tmp/.akash-last-deploy.log
+    python3 -u {{akash_dir}}/scripts/deploy.py --sdl {{akash_dir}}/sdl/cpu-backtest-ssh.yaml --wait-timeout 180 | tee /tmp/.akash-last-deploy.log
     dseq=$(sed -n 's/.*DSEQ: \([0-9]*\).*/\1/p' /tmp/.akash-last-deploy.log | head -1)
     if [ -n "{{tag}}" ] && [ -n "$dseq" ]; then
-        python3 scripts/akash_api.py tag --dseq "$dseq" --name "{{tag}}"
+        python3 {{akash_dir}}/scripts/akash_api.py tag --dseq "$dseq" --name "{{tag}}"
     fi
 
 # SSH into a running instance (auto-detects DSEQ if only one)
@@ -32,9 +32,9 @@ connect dseq="":
     echo "[INFO] recipe=connect started_at=$(date -u +"%Y-%m-%dT%H:%M:%SZ") cwd=$PWD log_file=$log_file dseq={{dseq}}"
     set -x
     if [ -n "{{dseq}}" ]; then
-        python3 scripts/akash_api.py connect --dseq {{dseq}}
+        python3 {{akash_dir}}/scripts/akash_api.py connect --dseq {{dseq}}
     else
-        python3 scripts/akash_api.py connect
+        python3 {{akash_dir}}/scripts/akash_api.py connect
     fi
 
 # Stop an instance (picks interactively if no DSEQ given)
@@ -49,9 +49,9 @@ down dseq="":
     echo "[INFO] recipe=down started_at=$(date -u +"%Y-%m-%dT%H:%M:%SZ") cwd=$PWD log_file=$log_file dseq={{dseq}}"
     set -x
     if [ -n "{{dseq}}" ]; then
-        python3 scripts/akash_api.py close --dseq {{dseq}}
+        python3 {{akash_dir}}/scripts/akash_api.py close --dseq {{dseq}}
     else
-        python3 scripts/akash_api.py close
+        python3 {{akash_dir}}/scripts/akash_api.py close
     fi
 
 # Stop all instances
@@ -65,7 +65,7 @@ down-all:
     trap 'status=$?; echo "[INFO] recipe=down-all finished_at=$(date -u +"%Y-%m-%dT%H:%M:%SZ") exit_code=${status} log_file=${log_file}"' EXIT
     echo "[INFO] recipe=down-all started_at=$(date -u +"%Y-%m-%dT%H:%M:%SZ") cwd=$PWD log_file=$log_file"
     set -x
-    python3 scripts/akash_api.py close-all
+    python3 {{akash_dir}}/scripts/akash_api.py close-all
 
 # Tag a deployment with a name
 # Usage: just tag DSEQ my-backtest
@@ -79,7 +79,7 @@ tag dseq name:
     trap 'status=$?; echo "[INFO] recipe=tag finished_at=$(date -u +"%Y-%m-%dT%H:%M:%SZ") exit_code=${status} log_file=${log_file}"' EXIT
     echo "[INFO] recipe=tag started_at=$(date -u +"%Y-%m-%dT%H:%M:%SZ") cwd=$PWD log_file=$log_file dseq={{dseq}} name={{name}}"
     set -x
-    python3 scripts/akash_api.py tag --dseq {{dseq}} --name "{{name}}"
+    python3 {{akash_dir}}/scripts/akash_api.py tag --dseq {{dseq}} --name "{{name}}"
 
 # ── Info ─────────────────────────────────────────────
 
@@ -94,7 +94,7 @@ ls:
     trap 'status=$?; echo "[INFO] recipe=ls finished_at=$(date -u +"%Y-%m-%dT%H:%M:%SZ") exit_code=${status} log_file=${log_file}"' EXIT
     echo "[INFO] recipe=ls started_at=$(date -u +"%Y-%m-%dT%H:%M:%SZ") cwd=$PWD log_file=$log_file"
     set -x
-    python3 scripts/akash_api.py list
+    python3 {{akash_dir}}/scripts/akash_api.py list
 
 # Show instance details (picks interactively if no DSEQ given)
 status dseq="":
@@ -108,9 +108,9 @@ status dseq="":
     echo "[INFO] recipe=status started_at=$(date -u +"%Y-%m-%dT%H:%M:%SZ") cwd=$PWD log_file=$log_file dseq={{dseq}}"
     set -x
     if [ -n "{{dseq}}" ]; then
-        python3 scripts/akash_api.py status --dseq {{dseq}}
+        python3 {{akash_dir}}/scripts/akash_api.py status --dseq {{dseq}}
     else
-        python3 scripts/akash_api.py status
+        python3 {{akash_dir}}/scripts/akash_api.py status
     fi
 
 # ── Testing ──────────────────────────────────────────
@@ -126,12 +126,12 @@ test timeout="240":
     trap 'status=$?; echo "[INFO] recipe=test finished_at=$(date -u +"%Y-%m-%dT%H:%M:%SZ") exit_code=${status} log_file=${log_file}"' EXIT
     echo "[INFO] recipe=test started_at=$(date -u +"%Y-%m-%dT%H:%M:%SZ") cwd=$PWD log_file=$log_file timeout={{timeout}}"
     set -x
-    python3 scripts/test_lifecycle.py --wait-timeout {{timeout}} --sdl sdl/cpu-backtest-ssh.yaml --ssh
+    python3 {{akash_dir}}/scripts/test_lifecycle.py --wait-timeout {{timeout}} --sdl {{akash_dir}}/sdl/cpu-backtest-ssh.yaml --ssh
 
 # ── Advanced ─────────────────────────────────────────
 
 # Deploy with custom SDL (e.g. no SSH, different image)
-deploy sdl="sdl/cpu-backtest.yaml" image="":
+deploy sdl="just-akash/sdl/cpu-backtest.yaml" image="":
     #!/bin/bash
     set -euo pipefail
     mkdir -p "{{log_dir}}"
@@ -141,6 +141,6 @@ deploy sdl="sdl/cpu-backtest.yaml" image="":
     trap 'status=$?; echo "[INFO] recipe=deploy finished_at=$(date -u +"%Y-%m-%dT%H:%M:%SZ") exit_code=${status} log_file=${log_file}"' EXIT
     echo "[INFO] recipe=deploy started_at=$(date -u +"%Y-%m-%dT%H:%M:%SZ") cwd=$PWD log_file=$log_file sdl={{sdl}} image={{image}}"
     set -x
-    cmd="python3 scripts/deploy.py --sdl {{sdl}}"
+    cmd="python3 {{akash_dir}}/scripts/deploy.py --sdl {{sdl}}"
     if [ -n "{{image}}" ]; then cmd="$cmd --image {{image}}"; fi
     eval "$cmd"
