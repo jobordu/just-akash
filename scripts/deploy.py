@@ -61,7 +61,8 @@ def deploy(
     sdl_path: str,
     gpu: bool = False,
     image: Optional[str] = None,
-    wait_timeout: int = 120,
+    bid_wait: int = 60,
+    bid_wait_retry: int = 120,
 ) -> dict:
     api_key = os.environ.get("AKASH_API_KEY")
     if not api_key:
@@ -78,7 +79,7 @@ def deploy(
     _log(
         logging.INFO,
         f"CONFIG  sdl={sdl_path}  gpu={gpu}  image={image or '(default)'}  "
-        f"wait_timeout={wait_timeout}s",
+        f"bid_wait={bid_wait}s  bid_wait_retry={bid_wait_retry}s",
     )
     if allowed:
         _log(logging.INFO, f"ALLOWED_PROVIDERS ({len(allowed)}): {allowed}")
@@ -147,88 +148,83 @@ def deploy(
         f"Full deployment response: {json.dumps(deployment_response, default=str)[:500]}",
     )
 
-    # Step 3: Poll for bids — wait for ALL allowed providers to bid (or timeout)
-    if allowed:
-        _log(
-            logging.INFO,
-            f"STEP 3: Polling for bids (timeout={wait_timeout}s, interval=5s, waiting for all {len(allowed)} allowed providers)...",
-        )
-    else:
-        _log(
-            logging.INFO,
-            f"STEP 3: Polling for bids (timeout={wait_timeout}s, interval=5s, accepting any provider)...",
-        )
+    # Step 3: Poll for bids — wait bid_wait then pick cheapest; if no bids, wait bid_wait_retry more
+    _log(
+        logging.INFO,
+        f"STEP 3: Polling for bids (wait {bid_wait}s, then pick cheapest; "
+        f"if none, wait {bid_wait_retry}s more)...",
+    )
     start_time = time.time()
     bids = []
     poll_count = 0
     last_bid_count = -1
 
-    while time.time() - start_time < wait_timeout:
-        poll_count += 1
-        elapsed = int(time.time() - start_time)
-        try:
-            bids = client.get_bids(str(dseq))
-            current_count = len(bids)
-        except RuntimeError as e:
-            _log(logging.WARNING, f"  poll #{poll_count} @ {elapsed}s: API error: {e}")
-            print(
-                f"\r  Waiting for bids... {elapsed}s (poll #{poll_count})",
-                end="",
-                flush=True,
-            )
-            time.sleep(5)
-            continue
-
-        if current_count != last_bid_count:
-            last_bid_count = current_count
-            if current_count == 0:
-                _log(logging.DEBUG, f"  poll #{poll_count} @ {elapsed}s: 0 bids")
-            else:
+    def _poll_bids(deadline):
+        nonlocal bids, poll_count, last_bid_count
+        while time.time() < deadline:
+            poll_count += 1
+            elapsed = int(time.time() - start_time)
+            try:
+                bids = client.get_bids(str(dseq))
+                current_count = len(bids)
+            except RuntimeError as e:
                 _log(
-                    logging.INFO,
-                    f"  poll #{poll_count} @ {elapsed}s: {current_count} bid(s) received",
+                    logging.WARNING,
+                    f"  poll #{poll_count} @ {elapsed}s: API error: {e}",
                 )
-                for i, b in enumerate(bids):
-                    p = _extract_provider(b) or "unknown"
-                    s = b.get("state", b.get("bid", {}).get("state", "?"))
-                    if allowed:
-                        in_allowlist = "ALLOWED" if p in allowed else "FOREIGN"
-                    else:
-                        in_allowlist = "ACCEPTED"
-                    _log(
-                        logging.INFO,
-                        f"    bid[{i}] provider={p}  price={_fmt_price(b)}  state={s}  [{in_allowlist}]",
-                    )
-
-        if current_count > 0 and allowed:
-            bidding_providers = {
-                _extract_provider(b) for b in bids if _extract_provider(b)
-            }
-            still_waiting = [p for p in allowed if p not in bidding_providers]
-            if still_waiting:
                 print(
-                    f"\r  Waiting for bids... {elapsed}s — still waiting for {len(still_waiting)} provider(s)",
+                    f"\r  Waiting for bids... {elapsed}s (poll #{poll_count})",
                     end="",
                     flush=True,
                 )
-            else:
-                _log(
-                    logging.INFO,
-                    f"  All {len(allowed)} allowed provider(s) have bid — proceeding to selection",
+                time.sleep(5)
+                continue
+
+            if current_count != last_bid_count:
+                last_bid_count = current_count
+                if current_count == 0:
+                    _log(logging.DEBUG, f"  poll #{poll_count} @ {elapsed}s: 0 bids")
+                else:
+                    _log(
+                        logging.INFO,
+                        f"  poll #{poll_count} @ {elapsed}s: {current_count} bid(s) received",
+                    )
+                    for i, b in enumerate(bids):
+                        p = _extract_provider(b) or "unknown"
+                        s = b.get("state", b.get("bid", {}).get("state", "?"))
+                        if allowed:
+                            in_allowlist = "ALLOWED" if p in allowed else "FOREIGN"
+                        else:
+                            in_allowlist = "ACCEPTED"
+                        _log(
+                            logging.INFO,
+                            f"    bid[{i}] provider={p}  price={_fmt_price(b)}  state={s}  [{in_allowlist}]",
+                        )
+
+            if current_count > 0:
+                print(
+                    f"\r  {current_count} bid(s) received after {elapsed}s", flush=True
                 )
-                break
-        elif current_count > 0 and not allowed:
-            break
-        else:
-            print(
-                f"\r  Waiting for bids... {elapsed}s (poll #{poll_count})",
-                end="",
-                flush=True,
-            )
+            else:
+                print(
+                    f"\r  Waiting for bids... {elapsed}s (poll #{poll_count})",
+                    end="",
+                    flush=True,
+                )
 
-        time.sleep(5)
+            time.sleep(5)
 
+    _log(logging.INFO, f"  Phase 1: waiting {bid_wait}s for bids...")
+    _poll_bids(start_time + bid_wait)
     print()
+
+    if not bids:
+        _log(
+            logging.WARNING,
+            f"No bids after {bid_wait}s — waiting {bid_wait_retry}s more...",
+        )
+        _poll_bids(start_time + bid_wait + bid_wait_retry)
+        print()
 
     if not bids:
         _log(
@@ -241,7 +237,7 @@ def deploy(
             "deposit too low, or no capacity on allowed providers",
         )
         raise RuntimeError(
-            f"No bids received within {wait_timeout}s. "
+            f"No bids received within {bid_wait + bid_wait_retry}s. "
             "Your SDL may be unsatisfiable or all providers are busy."
         )
 
@@ -383,10 +379,16 @@ def main():
         help="Override container image",
     )
     parser.add_argument(
-        "--wait-timeout",
+        "--bid-wait",
+        type=int,
+        default=60,
+        help="Seconds to wait for bids before picking cheapest (default: 60)",
+    )
+    parser.add_argument(
+        "--bid-wait-retry",
         type=int,
         default=120,
-        help="Seconds to wait for bids (default: 120)",
+        help="Seconds to wait for bids if none received after first phase (default: 120)",
     )
 
     args = parser.parse_args()
@@ -401,7 +403,8 @@ def main():
             sdl_path=args.sdl,
             gpu=args.gpu,
             image=args.image,
-            wait_timeout=args.wait_timeout,
+            bid_wait=args.bid_wait,
+            bid_wait_retry=args.bid_wait_retry,
         )
         sys.exit(0)
     except RuntimeError as e:
