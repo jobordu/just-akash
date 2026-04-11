@@ -1,0 +1,70 @@
+---
+version: "2.0"
+
+services:
+  backtest:
+    image: python:3.13-slim
+    params:
+      storage:
+        data:
+          mount: /data
+          readOnly: false
+    env:
+      - SSH_PUBKEY_B64=PLACEHOLDER_SSH_PUBKEY_B64
+    expose:
+      - port: 22
+        as: 22
+        to:
+          - global: true
+      - port: 8888
+        as: 8888
+        to:
+          - global: true
+    args:
+      - sh
+      - -c
+      - |
+        set -e
+        apt-get update -qq && apt-get install -y -qq openssh-server > /dev/null 2>&1
+        mkdir -p /run/sshd /root/.ssh
+        chmod 700 /root/.ssh
+        echo "$SSH_PUBKEY_B64" | base64 -d > /root/.ssh/authorized_keys
+        chmod 600 /root/.ssh/authorized_keys
+        sed -i 's/#PermitRootLogin.*/PermitRootLogin prohibit-password/' /etc/ssh/sshd_config
+        sed -i 's/#PasswordAuthentication.*/PasswordAuthentication no/' /etc/ssh/sshd_config
+        sed -i 's/#PubkeyAuthentication.*/PubkeyAuthentication yes/' /etc/ssh/sshd_config
+        ssh-keygen -A
+        /usr/sbin/sshd
+        echo "SSH ready on port 22 (key-auth only)"
+        pip install --quiet numpy pandas scipy optuna
+        echo "Packages installed. Container ready."
+        sleep infinity
+
+profiles:
+  compute:
+    backtest:
+      resources:
+        cpu:
+          units: 16
+        memory:
+          size: 64Gi
+        storage:
+          - size: 20Gi
+          - name: data
+            size: 200Gi
+            attributes:
+              persistent: true
+              class: beta3
+
+  placement:
+    akash:
+      pricing:
+        backtest:
+          denom: uakt
+          amount: 1000
+
+deployment:
+  backtest:
+    akash:
+      profile: backtest
+      count: 1
