@@ -5,25 +5,26 @@ Multi-step Akash deployment orchestrator.
 Workflow:
 1. Read SDL file
 2. Create deployment via Console API
-3. Poll for bids (every 5s)
+3. Poll for bids (two-phase: bid_wait, then bid_wait_retry)
 4. Select cheapest bid
 5. Create lease with provider
 6. Return deployment DSEQ and lease details
 """
 
-import argparse
 import json
 import logging
 import os
+import re
 import sys
 import time
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Optional
 
-sys.path.insert(0, str(Path(__file__).parent))
-
-from akash_api import AkashConsoleAPI, _extract_provider, _extract_bid_price
+from .api import (
+    AkashConsoleAPI,
+    _extract_bid_price,
+    _extract_provider,
+)
 
 logger = logging.getLogger("akash.deploy")
 
@@ -60,7 +61,7 @@ def _log_bid_table(bids: list, label: str):
 def deploy(
     sdl_path: str,
     gpu: bool = False,
-    image: Optional[str] = None,
+    image: str | None = None,
     bid_wait: int = 60,
     bid_wait_retry: int = 120,
 ) -> dict:
@@ -92,17 +93,11 @@ def deploy(
     if not sdl_path_obj.exists():
         raise RuntimeError(f"SDL file not found: {sdl_path}")
 
-    with open(sdl_path_obj, "r") as f:
+    with open(sdl_path_obj) as f:
         sdl_content = f.read()
     _log(logging.DEBUG, f"SDL content length: {len(sdl_content)} bytes")
 
     if image:
-        sdl_content = sdl_content.replace(
-            "image: python:3.13-slim",
-            f"image: {image}",
-        )
-        import re
-
         sdl_content = re.sub(
             r"image:\s+[^\n]+",
             f"image: {image}",
@@ -148,7 +143,8 @@ def deploy(
         f"Full deployment response: {json.dumps(deployment_response, default=str)[:500]}",
     )
 
-    # Step 3: Poll for bids — wait bid_wait then pick cheapest; if no bids, wait bid_wait_retry more
+    # Step 3: Poll for bids — wait bid_wait then pick cheapest;
+    #          if no bids, wait bid_wait_retry more
     _log(
         logging.INFO,
         f"STEP 3: Polling for bids (wait {bid_wait}s, then pick cheapest; "
@@ -198,13 +194,12 @@ def deploy(
                             in_allowlist = "ACCEPTED"
                         _log(
                             logging.INFO,
-                            f"    bid[{i}] provider={p}  price={_fmt_price(b)}  state={s}  [{in_allowlist}]",
+                            f"    bid[{i}] provider={p}  "
+                            f"price={_fmt_price(b)}  state={s}  [{in_allowlist}]",
                         )
 
             if current_count > 0:
-                print(
-                    f"\r  {current_count} bid(s) received after {elapsed}s", flush=True
-                )
+                print(f"\r  {current_count} bid(s) received after {elapsed}s", flush=True)
             else:
                 print(
                     f"\r  Waiting for bids... {elapsed}s (poll #{poll_count})",
@@ -251,9 +246,7 @@ def deploy(
         bidding_providers = {_extract_provider(b) for b in bids if _extract_provider(b)}
         no_bid_from = [p for p in allowed if p not in bidding_providers]
         if no_bid_from:
-            _log(
-                logging.WARNING, f"NO BID FROM {len(no_bid_from)} allowed provider(s):"
-            )
+            _log(logging.WARNING, f"NO BID FROM {len(no_bid_from)} allowed provider(s):")
             for p in no_bid_from:
                 _log(logging.WARNING, f"  {p}")
                 try:
@@ -267,9 +260,12 @@ def deploy(
                         mem = stats.get("memory", {})
                         _log(
                             logging.WARNING,
-                            f"    on-chain status: isOnline={online} isValidVersion={valid} "
-                            f"uptime1d={uptime} cpu_avail={cpu.get('available')} cpu_active={cpu.get('active')} "
-                            f"mem_avail={mem.get('available')} mem_active={mem.get('active')}",
+                            f"    on-chain status: isOnline={online} "
+                            f"isValidVersion={valid} uptime1d={uptime} "
+                            f"cpu_avail={cpu.get('available')} "
+                            f"cpu_active={cpu.get('active')} "
+                            f"mem_avail={mem.get('available')} "
+                            f"mem_active={mem.get('active')}",
                         )
                     else:
                         _log(
@@ -290,9 +286,7 @@ def deploy(
 
         if not our_bids:
             foreign = [_extract_provider(b) or "unknown" for b in bids]
-            _log(
-                logging.ERROR, f"All {len(bids)} bid(s) are from non-allowed providers"
-            )
+            _log(logging.ERROR, f"All {len(bids)} bid(s) are from non-allowed providers")
             _log(logging.ERROR, f"  Allowed: {allowed}")
             _log(logging.ERROR, f"  Received from: {foreign}")
             raise RuntimeError(
@@ -310,9 +304,7 @@ def deploy(
     for i, b in enumerate(sorted(our_bids, key=lambda b: _extract_bid_price(b)[0])):
         p = _extract_provider(b) or "unknown"
         marker = " <-- SELECTED" if i == 0 else ""
-        _log(
-            logging.INFO, f"  rank[{i + 1}] provider={p}  price={_fmt_price(b)}{marker}"
-        )
+        _log(logging.INFO, f"  rank[{i + 1}] provider={p}  price={_fmt_price(b)}{marker}")
 
     cheapest_bid = min(our_bids, key=lambda b: _extract_bid_price(b)[0])
     provider = _extract_provider(cheapest_bid) or ""
@@ -341,13 +333,14 @@ def deploy(
     _log(logging.INFO, "Lease created successfully!")
     _log(
         logging.INFO,
-        f"DEPLOYMENT SUMMARY  DSEQ={dseq}  provider={provider}  price={price_amount} {price_denom}",
+        f"DEPLOYMENT SUMMARY  DSEQ={dseq}  "
+        f"provider={provider}  price={price_amount} {price_denom}",
     )
-    print(f"\nDeployment Summary:")
+    print("\nDeployment Summary:")
     print(f"  DSEQ: {dseq}")
     print(f"  Provider: {provider}")
     print(f"  Price: {price_amount} {price_denom}")
-    print(f"\nUse 'just status {dseq}' to check deployment status")
+    print(f"\nUse 'just-akash status {dseq}' to check deployment status")
 
     return {
         "dseq": dseq,
@@ -358,8 +351,9 @@ def deploy(
     }
 
 
-def main():
-    """CLI entry point."""
+def deploy_main():
+    import argparse
+
     parser = argparse.ArgumentParser(
         description="Deploy to Akash Network",
         formatter_class=argparse.RawDescriptionHelpFormatter,
@@ -399,7 +393,7 @@ def main():
     )
 
     try:
-        result = deploy(
+        deploy(
             sdl_path=args.sdl,
             gpu=args.gpu,
             image=args.image,
@@ -410,7 +404,3 @@ def main():
     except RuntimeError as e:
         print(f"Error: {e}", file=sys.stderr)
         sys.exit(1)
-
-
-if __name__ == "__main__":
-    main()

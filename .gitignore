@@ -3,3 +3,7 @@
 __pycache__/
 *.pyc
 .tags.json
+.ruff_cache/
+dist/
+*.egg-info/
+.venv/

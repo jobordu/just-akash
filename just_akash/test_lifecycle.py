@@ -17,7 +17,6 @@ import subprocess
 import sys
 import time
 
-# ── Colors ───────────────────────────────────────────
 GREEN = "\033[92m"
 RED = "\033[91m"
 YELLOW = "\033[93m"
@@ -44,10 +43,13 @@ def log_info(msg):
 
 
 def run(cmd: str, timeout: int = 60, input_text: str = None) -> subprocess.CompletedProcess:
-    """Run a shell command and return result."""
     return subprocess.run(
-        cmd, shell=True, capture_output=True, text=True,
-        timeout=timeout, input=input_text,
+        cmd,
+        shell=True,
+        capture_output=True,
+        text=True,
+        timeout=timeout,
+        input=input_text,
     )
 
 
@@ -59,7 +61,6 @@ def main():
     print(f"{BOLD}  Akash Lifecycle Test (SSH){RESET}")
     print(f"{BOLD}{'=' * 60}{RESET}")
 
-    # ── Step 1: Validate environment ─────────────────────────
     log_step(1, "Validate environment")
 
     for var in ("AKASH_API_KEY", "AKASH_PROVIDERS", "SSH_PUBKEY"):
@@ -74,7 +75,6 @@ def main():
     for p in providers:
         log_info(f"  {p}")
 
-    # Find SSH key
     ssh_key = None
     for candidate in [
         os.path.expanduser(f"~/.ssh/id_ed25519_akash_node{i}") for i in range(1, 4)
@@ -87,7 +87,6 @@ def main():
         sys.exit(1)
     log_pass(f"SSH key: {ssh_key}")
 
-    # ── Step 2: just ls (initial state) ──────────────────────
     log_step(2, "just ls — check initial state")
 
     r = run("just ls")
@@ -97,7 +96,6 @@ def main():
     log_pass("API reachable")
     log_info(r.stdout.strip())
 
-    # ── Step 3: just up ──────────────────────────────────────
     log_step(3, "just up — deploy SSH instance")
 
     r = run("just up", timeout=300)
@@ -107,7 +105,6 @@ def main():
     if r.returncode != 0:
         log_fail("just up failed")
         failures.append(f"up: exit {r.returncode}")
-        # Try to extract DSEQ for cleanup
         m = re.search(r"DSEQ[:\s]+(\d+)", output)
         if m:
             dseq = m.group(1)
@@ -115,7 +112,6 @@ def main():
         _summary(failures)
         sys.exit(1)
 
-    # Extract DSEQ from output
     m = re.search(r"DSEQ[:\s]+(\d+)", output)
     if not m:
         log_fail("Could not parse DSEQ from 'just up' output")
@@ -126,10 +122,8 @@ def main():
     dseq = m.group(1)
     log_pass(f"Deployed: DSEQ={dseq}")
 
-    # ── Step 4: just status — verify provider ────────────────
     log_step(4, f"just status {dseq} — verify our provider")
 
-    # Wait for lease to propagate
     log_info("Waiting 10s for lease propagation...")
     time.sleep(10)
 
@@ -141,7 +135,6 @@ def main():
         log_fail(f"just status failed: {r.stderr.strip()}")
         failures.append("status: failed")
     else:
-        # Check provider is one of ours
         provider_found = False
         for p in providers:
             if p in status_output:
@@ -152,23 +145,16 @@ def main():
             log_fail("Provider not found in status output or not ours")
             failures.append("status: foreign or missing provider")
 
-        # Check SSH line present
         if "ssh -p" in status_output:
             log_pass("SSH connection info available")
         else:
             log_info("No SSH info in status (port may still be propagating)")
 
-    # ── Step 5: just connect — SSH verify ────────────────────
     log_step(5, f"just connect {dseq} — SSH into container")
 
-    # The `just connect` command does os.execvp (replaces process), so we
-    # can't use it directly. Instead we call the underlying SSH with a
-    # non-interactive command, same way `connect` would.
-    # First get the SSH host:port from status output
     ssh_match = re.search(r"ssh -p (\d+) root@(\S+)", status_output)
 
     if not ssh_match:
-        # Retry status to get SSH info
         log_info("Retrying status for SSH details...")
         time.sleep(5)
         r = run(f"just status {dseq}")
@@ -190,16 +176,24 @@ def main():
                 result = subprocess.run(
                     [
                         "ssh",
-                        "-o", "StrictHostKeyChecking=no",
-                        "-o", "UserKnownHostsFile=/dev/null",
-                        "-o", "ConnectTimeout=10",
-                        "-o", "BatchMode=yes",
-                        "-i", ssh_key,
-                        "-p", ssh_port,
+                        "-o",
+                        "StrictHostKeyChecking=no",
+                        "-o",
+                        "UserKnownHostsFile=/dev/null",
+                        "-o",
+                        "ConnectTimeout=10",
+                        "-o",
+                        "BatchMode=yes",
+                        "-i",
+                        ssh_key,
+                        "-p",
+                        ssh_port,
                         f"root@{ssh_host}",
                         "echo akash-ssh-ok",
                     ],
-                    capture_output=True, text=True, timeout=15,
+                    capture_output=True,
+                    text=True,
+                    timeout=15,
                 )
                 if "akash-ssh-ok" in result.stdout:
                     connected = True
@@ -213,13 +207,11 @@ def main():
         if connected:
             log_pass(f"SSH connection to {ssh_host}:{ssh_port} SUCCEEDED")
         else:
-            log_fail(f"SSH connection FAILED after 18 attempts")
+            log_fail("SSH connection FAILED after 18 attempts")
             failures.append(f"connect: SSH failed to {ssh_host}:{ssh_port}")
 
-    # ── Step 6: just down — close deployment ─────────────────
     log_step(6, f"just down {dseq} — stop instance")
 
-    # `just down` has a confirmation prompt — pipe "y"
     r = run(f"just down {dseq}", input_text="y\n")
     output = r.stdout + r.stderr
     print(output.strip())
@@ -230,10 +222,9 @@ def main():
     elif "closed" in output.lower():
         log_pass(f"Deployment {dseq} closed")
     else:
-        log_fail(f"Unexpected down output")
+        log_fail("Unexpected down output")
         failures.append("down: unexpected output")
 
-    # ── Step 7: just ls — verify cleanup ─────────────────────
     log_step(7, "just ls — verify instance is gone")
 
     time.sleep(3)
@@ -251,7 +242,6 @@ def main():
 
 
 def _cleanup(dseq: str):
-    """Best-effort cleanup."""
     log_info(f"Cleaning up {dseq}...")
     run(f"just down {dseq}", input_text="y\n", timeout=30)
 

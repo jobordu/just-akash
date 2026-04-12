@@ -4,21 +4,18 @@ Akash Console API client with CLI dispatch.
 
 Provides:
 - AkashConsoleAPI class for interacting with Akash Console API
-- CLI subcommands: list, status, close, close-all, logs, shell
+- CLI subcommands: list, status, close, close-all, logs, shell, tag
 """
 
-import argparse
 import json
 import logging
 import os
-from pathlib import Path
-import shutil
-import subprocess
 import sys
-import urllib.request
 import urllib.error
+import urllib.request
 from datetime import datetime, timezone
-from typing import Any, Dict, Optional, List
+from pathlib import Path
+from typing import Any
 
 logger = logging.getLogger("akash.api")
 
@@ -27,12 +24,10 @@ def _ts() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
-# ── Local tag store ──────────────────────────────────
 TAGS_FILE = Path(__file__).resolve().parent.parent / ".tags.json"
 
 
-def _load_tags() -> Dict[str, str]:
-    """Load DSEQ → name mapping from local file."""
+def _load_tags() -> dict[str, str]:
     if TAGS_FILE.exists():
         try:
             return json.loads(TAGS_FILE.read_text())
@@ -41,29 +36,23 @@ def _load_tags() -> Dict[str, str]:
     return {}
 
 
-def _save_tags(tags: Dict[str, str]):
-    """Save DSEQ → name mapping to local file."""
+def _save_tags(tags: dict[str, str]):
     TAGS_FILE.write_text(json.dumps(tags, indent=2) + "\n")
 
 
 def _get_tag(dseq: str) -> str:
-    """Get tag for a DSEQ, or empty string."""
     return _load_tags().get(str(dseq), "")
 
 
 def _resolve_dseq(identifier: str) -> str:
-    """Resolve a DSEQ from either a numeric ID or a tag name."""
     if not identifier:
         return ""
-    # If it's all digits, it's a DSEQ
     if identifier.isdigit():
         return identifier
-    # Otherwise look up by tag
     tags = _load_tags()
     for dseq, tag in tags.items():
         if tag == identifier:
             return dseq
-    # No match
     print(f"Error: No deployment found with tag '{identifier}'")
     print(f"Active tags: {', '.join(tags.values()) or 'none'}")
     sys.exit(1)
@@ -86,19 +75,15 @@ class AkashConsoleAPI:
         self,
         method: str,
         endpoint: str,
-        data: Optional[Dict[str, Any]] = None,
-    ) -> Dict[str, Any]:
-        """Make HTTP request to Akash Console API."""
+        data: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
         url = f"{self.base_url}{endpoint}"
 
         logger.debug(
             f"[{_ts()}] API {method} {endpoint} data={json.dumps(data) if data else 'none'}"
         )
 
-        if data:
-            request_body = json.dumps(data).encode("utf-8")
-        else:
-            request_body = None
+        request_body = json.dumps(data).encode("utf-8") if data else None
 
         req = urllib.request.Request(
             url,
@@ -111,20 +96,20 @@ class AkashConsoleAPI:
             t0 = datetime.now(timezone.utc)
             with urllib.request.urlopen(req) as response:
                 response_data = response.read().decode("utf-8")
-                elapsed_ms = int(
-                    (datetime.now(timezone.utc) - t0).total_seconds() * 1000
-                )
+                elapsed_ms = int((datetime.now(timezone.utc) - t0).total_seconds() * 1000)
                 result = json.loads(response_data) if response_data else {}
                 logger.debug(
-                    f"[{_ts()}] API {method} {endpoint} -> {response.status} ({elapsed_ms}ms) "
-                    f"keys={list(result.keys()) if isinstance(result, dict) else type(result).__name__}"
+                    f"[{_ts()}] API {method} {endpoint} -> "
+                    f"{response.status} ({elapsed_ms}ms) keys="
+                    f"{list(result.keys()) if isinstance(result, dict) else type(result).__name__}"
                 )
                 return result
         except urllib.error.HTTPError as e:
             error_body = e.read().decode("utf-8")
             elapsed_ms = int((datetime.now(timezone.utc) - t0).total_seconds() * 1000)
             logger.error(
-                f"[{_ts()}] API {method} {endpoint} -> HTTP {e.code} ({elapsed_ms}ms) body={error_body[:500]}"
+                f"[{_ts()}] API {method} {endpoint} -> HTTP {e.code} ({elapsed_ms}ms) "
+                f"body={error_body[:500]}"
             )
             try:
                 error_json = json.loads(error_body)
@@ -136,36 +121,21 @@ class AkashConsoleAPI:
             logger.error(f"[{_ts()}] API {method} {endpoint} -> URLError: {e}")
             raise RuntimeError(f"Connection error: {e}") from e
 
-    def list_deployments(self, active_only: bool = True) -> List[Dict[str, Any]]:
-        """List deployments. By default only returns active ones."""
+    def list_deployments(self, active_only: bool = True) -> list[dict[str, Any]]:
         response = self._request("GET", "/v1/deployments")
         data = response.get("data", response)
         deployments = data.get("deployments", [])
         if active_only:
             deployments = [
-                d
-                for d in deployments
-                if d.get("deployment", {}).get("state") == "active"
+                d for d in deployments if d.get("deployment", {}).get("state") == "active"
             ]
         return deployments
 
-    def get_deployment(self, dseq: str) -> Dict[str, Any]:
-        """Get deployment details by DSEQ."""
+    def get_deployment(self, dseq: str) -> dict[str, Any]:
         response = self._request("GET", f"/v1/deployments/{dseq}")
         return response.get("data", response)
 
-    def create_deployment(
-        self, sdl_content: str, deposit: float = 5.0
-    ) -> Dict[str, Any]:
-        """Create a new deployment from SDL content.
-
-        Args:
-            sdl_content: SDL YAML as a string
-            deposit: Deposit in USD (minimum $5)
-
-        Returns:
-            Dict with 'dseq' and 'manifest' keys
-        """
+    def create_deployment(self, sdl_content: str, deposit: float = 5.0) -> dict[str, Any]:
         response = self._request(
             "POST",
             "/v1/deployments",
@@ -174,16 +144,11 @@ class AkashConsoleAPI:
         data = response.get("data", response)
         return data
 
-    def close_deployment(self, dseq: str) -> Dict[str, Any]:
-        """Close a deployment by DSEQ."""
-        response = self._request(
-            "DELETE",
-            f"/v1/deployments/{dseq}",
-        )
+    def close_deployment(self, dseq: str) -> dict[str, Any]:
+        response = self._request("DELETE", f"/v1/deployments/{dseq}")
         return response.get("data", response)
 
-    def close_all_deployments(self) -> Dict[str, Any]:
-        """Close all active deployments."""
+    def close_all_deployments(self) -> dict[str, Any]:
         deployments = self.list_deployments()
         results = []
         for deployment in deployments:
@@ -197,31 +162,23 @@ class AkashConsoleAPI:
                 print(f"Warning: Failed to close deployment {dep_dseq}: {e}")
         return {"closed": results}
 
-    def get_bids(self, dseq: str) -> List[Dict[str, Any]]:
-        """Get all bids for a deployment.
-
-        Returns list of bid objects. Each bid has:
-        - bid.id.provider: provider address
-        - bid.price.amount / bid.price.denom: pricing
-        - bid.state: bid state
-        """
+    def get_bids(self, dseq: str) -> list[dict[str, Any]]:
         response = self._request("GET", f"/v1/bids?dseq={dseq}")
         data = response.get("data", response)
-        # API may return bids as a list directly or nested under "bids" key
         if isinstance(data, list):
             return data
         return data.get("bids", [])
 
-    def get_provider(self, owner: str) -> Optional[Dict[str, Any]]:
-        """Get provider details by owner address.
-
-        Returns dict with isOnline, stats (cpu/memory/storage available/active),
-        uptime, attributes, etc.
-        """
+    def get_provider(self, owner: str) -> dict[str, Any] | None:
         try:
             response = self._request("GET", "/v1/providers")
-            data = response.get("data", response) if isinstance(response, dict) else []
-            providers = data if isinstance(data, list) else data.get("providers", [])
+            if isinstance(response, list):
+                providers = response
+            elif isinstance(response, dict):
+                data = response.get("data", response)
+                providers = data if isinstance(data, list) else data.get("providers", [])
+            else:
+                providers = []
             for p in providers:
                 if isinstance(p, dict) and p.get("owner") == owner:
                     return p
@@ -231,16 +188,7 @@ class AkashConsoleAPI:
 
     def create_lease(
         self, dseq: str, provider: str, manifest: str, gseq: int = 1, oseq: int = 1
-    ) -> Dict[str, Any]:
-        """Create a lease with a provider.
-
-        Args:
-            dseq: Deployment sequence number
-            provider: Provider address
-            manifest: Manifest string from create_deployment response
-            gseq: Group sequence (default 1)
-            oseq: Order sequence (default 1)
-        """
+    ) -> dict[str, Any]:
         return self._request(
             "POST",
             "/v1/leases",
@@ -258,12 +206,9 @@ class AkashConsoleAPI:
         )
 
 
-def _extract_dseq(deployment: Dict[str, Any]) -> Optional[str]:
-    """Extract DSEQ from a deployment object (handles nested formats)."""
-    # Direct field
+def _extract_dseq(deployment: dict[str, Any]) -> str | None:
     if "dseq" in deployment:
         return str(deployment["dseq"])
-    # Nested under deployment.id
     dep = deployment.get("deployment", {})
     dep_id = dep.get("id", {})
     if "dseq" in dep_id:
@@ -271,22 +216,14 @@ def _extract_dseq(deployment: Dict[str, Any]) -> Optional[str]:
     return None
 
 
-def _extract_provider(bid: Dict[str, Any]) -> Optional[str]:
-    """Extract provider address from a bid object."""
-    # bid.id.provider (documented format)
+def _extract_provider(bid: dict[str, Any]) -> str | None:
     bid_id = bid.get("id", bid.get("bid", {}).get("id", {}))
     if "provider" in bid_id:
         return bid_id["provider"]
-    # Flat field fallback
     return bid.get("provider")
 
 
-def _extract_bid_price(bid: Dict[str, Any]) -> tuple:
-    """Extract price amount and denom from a bid object.
-
-    Returns:
-        (amount, denom) tuple. amount is float, denom is str (e.g. 'uakt', 'usd').
-    """
+def _extract_bid_price(bid: dict[str, Any]) -> tuple:
     price = bid.get("price", bid.get("bid", {}).get("price", {}))
     if isinstance(price, dict):
         amount = float(price.get("amount", float("inf")))
@@ -295,8 +232,7 @@ def _extract_bid_price(bid: Dict[str, Any]) -> tuple:
     return (float(price) if price else float("inf"), "uakt")
 
 
-def _extract_ssh_info(deployment: Dict[str, Any]) -> Optional[Dict[str, Any]]:
-    """Extract SSH host/port from a deployment's lease forwarded ports."""
+def _extract_ssh_info(deployment: dict[str, Any]) -> dict[str, Any] | None:
     for lease in deployment.get("leases", []):
         status = lease.get("status") or {}
         fwd_ports = status.get("forwarded_ports") or {}
@@ -311,8 +247,7 @@ def _extract_ssh_info(deployment: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     return None
 
 
-def _extract_lease_provider(deployment: Dict[str, Any]) -> Optional[str]:
-    """Extract the provider address from a deployment's lease."""
+def _extract_lease_provider(deployment: dict[str, Any]) -> str | None:
     for lease in deployment.get("leases", []):
         lease_id = lease.get("id", {})
         if "provider" in lease_id:
@@ -320,8 +255,7 @@ def _extract_lease_provider(deployment: Dict[str, Any]) -> Optional[str]:
     return None
 
 
-def format_deployments_table(deployments: List[Dict[str, Any]]) -> str:
-    """Format deployments as a human-readable table."""
+def format_deployments_table(deployments: list[dict[str, Any]]) -> str:
     if not deployments:
         return "No active deployments."
 
@@ -337,24 +271,20 @@ def format_deployments_table(deployments: List[Dict[str, Any]]) -> str:
         ssh_col = f"{ssh['host']}:{ssh['port']}" if ssh else "-"
         rows.append((dseq, tag, state, provider[:20], ssh_col))
 
-    # Column widths
     headers = ("DSEQ", "Tag", "State", "Provider", "SSH")
     widths = [max(len(h), max(len(r[i]) for r in rows)) for i, h in enumerate(headers)]
 
-    lines = ["  ".join(h.ljust(w) for h, w in zip(headers, widths))]
+    lines = ["  ".join(h.ljust(w) for h, w in zip(headers, widths, strict=False))]
     lines.append("-" * len(lines[0]))
     for row in rows:
-        lines.append("  ".join(v.ljust(w) for v, w in zip(row, widths)))
+        lines.append("  ".join(v.ljust(w) for v, w in zip(row, widths, strict=False)))
 
     return "\n".join(lines)
 
 
-def _interactive_pick(
-    deployments: List[Dict[str, Any]], client: "AkashConsoleAPI"
-) -> str:
-    """Interactive deployment picker with arrow keys. Falls back to first entry when not a TTY."""
-    import tty
+def _interactive_pick(deployments: list[dict[str, Any]], client: "AkashConsoleAPI") -> str:
     import termios
+    import tty
 
     if not sys.stdin.isatty():
         dseq = _extract_dseq(deployments[0])
@@ -379,19 +309,16 @@ def _interactive_pick(
 
     def render():
         out = []
-        # In raw mode \n doesn't add \r — move up and clear each line manually
         if render.drawn:
-            out.append(f"\033[{len(items) + 1}A")  # cursor up
+            out.append(f"\033[{len(items) + 1}A")
         out.append(
-            f"\r\033[K\033[1mSelect deployment:\033[0m  ↑↓ navigate  Enter select  q cancel\r\n"
+            "\r\033[K\033[1mSelect deployment:\033[0m  ↑↓ navigate  Enter select  q cancel\r\n"
         )
         for i, (_, label, prov, ssh_str) in enumerate(items):
             marker = "\033[92m▸\033[0m" if i == selected else " "
             highlight = "\033[1m" if i == selected else ""
             reset = "\033[0m"
-            out.append(
-                f"\r\033[K  {marker} {highlight}{label}  {prov}  {ssh_str}{reset}\r\n"
-            )
+            out.append(f"\r\033[K  {marker} {highlight}{label}  {prov}  {ssh_str}{reset}\r\n")
         sys.stdout.write("".join(out))
         sys.stdout.flush()
         render.drawn = True
@@ -407,12 +334,12 @@ def _interactive_pick(
                 break
             if ch == "\x1b":
                 seq = sys.stdin.read(2)
-                if seq == "[A":  # up
+                if seq == "[A":
                     selected = (selected - 1) % len(items)
-                elif seq == "[B":  # down
+                elif seq == "[B":
                     selected = (selected + 1) % len(items)
                 render()
-            elif ch == "q" or ch == "\x03":  # q or Ctrl-C
+            elif ch == "q" or ch == "\x03":
                 sys.stdout.write("\r\nCancelled.\r\n")
                 sys.stdout.flush()
                 sys.exit(0)
@@ -425,8 +352,7 @@ def _interactive_pick(
     return dseq
 
 
-def main():
-    """CLI dispatch."""
+def api_main():
     api_key = os.environ.get("AKASH_API_KEY")
     if not api_key:
         print("Error: AKASH_API_KEY environment variable not set.")
@@ -435,10 +361,13 @@ def main():
 
     client = AkashConsoleAPI(api_key)
 
+    import argparse
+
     parser = argparse.ArgumentParser(
         description="Akash Console API CLI",
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
+    parser.add_argument("-y", "--yes", action="store_true", help="Skip confirmation prompts")
     subparsers = parser.add_subparsers(dest="command", help="Command to run")
 
     subparsers.add_parser("list", help="List all active deployments")
@@ -447,12 +376,8 @@ def main():
     status_p.add_argument("--dseq", default="")
 
     connect_p = subparsers.add_parser("connect", help="SSH into a running deployment")
-    connect_p.add_argument(
-        "--dseq", default="", help="DSEQ (auto-detects if only one deployment)"
-    )
-    connect_p.add_argument(
-        "--key", default="", help="SSH private key path (auto-detects)"
-    )
+    connect_p.add_argument("--dseq", default="")
+    connect_p.add_argument("--key", default="")
 
     close_p = subparsers.add_parser("close", help="Close a deployment")
     close_p.add_argument("--dseq", default="")
@@ -461,9 +386,7 @@ def main():
 
     tag_p = subparsers.add_parser("tag", help="Tag a deployment with a name")
     tag_p.add_argument("--dseq", required=True)
-    tag_p.add_argument(
-        "--name", required=True, help="Human-readable name for this deployment"
-    )
+    tag_p.add_argument("--name", required=True)
 
     args = parser.parse_args()
 
@@ -499,7 +422,6 @@ def main():
             ssh = _extract_ssh_info(deployment)
 
             if not sys.stdout.isatty():
-                # Machine-readable JSON for Canopy and other tools
                 canopy_status = (
                     "ready"
                     if state == "active"
@@ -507,7 +429,7 @@ def main():
                     if state in ("closed", "failed")
                     else "unknown"
                 )
-                result: Dict[str, Any] = {"status": canopy_status}
+                result: dict[str, Any] = {"status": canopy_status}
                 if ssh:
                     result["endpoint"] = f"ssh -p {ssh['port']} root@{ssh['host']}"
                 print(json.dumps(result))
@@ -518,14 +440,11 @@ def main():
                     header += f"  ({tag})"
                 print(f"{header}:")
                 print(f"  State:    {state}")
-                print(
-                    f"  Provider: {_extract_lease_provider(deployment) or 'no lease'}"
-                )
+                print(f"  Provider: {_extract_lease_provider(deployment) or 'no lease'}")
 
                 if ssh:
                     print(f"  SSH:      ssh -p {ssh['port']} root@{ssh['host']}")
 
-                # Show other forwarded ports
                 for lease in deployment.get("leases", []):
                     lease_status = lease.get("status") or {}
                     fwd = lease_status.get("forwarded_ports") or {}
@@ -533,7 +452,8 @@ def main():
                         for p in ports:
                             if p.get("port") != 22:
                                 print(
-                                    f"  Port:     {p['host']}:{p['externalPort']} → {p['port']}/{p.get('proto', 'TCP')} ({svc})"
+                                    f"  Port:     {p['host']}:{p['externalPort']} "
+                                    f"→ {p['port']}/{p.get('proto', 'TCP')} ({svc})"
                                 )
 
                     services = lease_status.get("services") or {}
@@ -548,7 +468,6 @@ def main():
                     print(f"  Escrow:   {f.get('amount', '?')} {f.get('denom', '?')}")
 
         elif args.command == "connect":
-            # Resolve DSEQ
             dseq = _resolve_dseq(args.dseq)
             if not dseq:
                 deployments = client.list_deployments()
@@ -565,10 +484,9 @@ def main():
             ssh = _extract_ssh_info(deployment)
             if not ssh:
                 print(f"No SSH port (22) found on deployment {dseq}.")
-                print("Deploy with SSH SDL: just akash-deploy-ssh")
+                print("Deploy with SSH SDL: just up")
                 sys.exit(1)
 
-            # Find SSH key
             key_path = args.key
             if not key_path:
                 for candidate in [
@@ -616,10 +534,8 @@ def main():
 
             tag = _get_tag(dseq)
             label = f"{dseq} ({tag})" if tag else dseq
-            confirm = input(f"Close deployment {label}? (y/N) ").strip().lower()
-            if confirm == "y":
+            if args.yes or input(f"Close deployment {label}? (y/N) ").strip().lower() == "y":
                 client.close_deployment(dseq)
-                # Clean up tag
                 tags = _load_tags()
                 tags.pop(dseq, None)
                 _save_tags(tags)
@@ -634,10 +550,8 @@ def main():
             else:
                 print(f"Found {len(deployments)} active deployment(s):")
                 print(format_deployments_table(deployments))
-                confirm = input("\nClose all? (y/N) ").strip().lower()
-                if confirm == "y":
+                if args.yes or input("\nClose all? (y/N) ").strip().lower() == "y":
                     client.close_all_deployments()
-                    # Clean up tags for closed deployments
                     tags = _load_tags()
                     for d in deployments:
                         dseq = _extract_dseq(d)
@@ -657,7 +571,3 @@ def main():
     except RuntimeError as e:
         print(f"Error: {e}", file=sys.stderr)
         sys.exit(1)
-
-
-if __name__ == "__main__":
-    main()

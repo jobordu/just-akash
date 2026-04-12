@@ -1,0 +1,15 @@
+# Gitleaks configuration for just-akash.
+# Docs: https://github.com/gitleaks/gitleaks
+
+title = "just-akash"
+
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Project-level allowlist"
+
+paths = [
+  '''\.env\.example''',
+  '''\.secrets\.baseline''',
+]
