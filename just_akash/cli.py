@@ -46,6 +46,7 @@ def main():
     api_p.add_argument("--name", default="")
     api_p.add_argument("--key", default="")
     api_p.add_argument("-y", "--yes", action="store_true", help="Skip confirmation prompts")
+    api_p.add_argument("--json", action="store_true", help="Output in JSON format")
 
     # ── test ────────────────────────────────────────────
     test_p = subparsers.add_parser("test", help="End-to-end lifecycle test")
@@ -83,7 +84,21 @@ def main():
             sys.exit(1)
 
     elif args.command == "api":
-        from .api import AkashConsoleAPI, _get_tag, _load_tags, _resolve_dseq, _save_tags
+        from .api import (
+            AkashConsoleAPI,
+            _confirm,
+            _extract_dseq,
+            _extract_lease_provider,
+            _extract_ssh_info,
+            _get_tag,
+            _interactive_pick,
+            _json_output,
+            _load_tags,
+            _resolve_dseq,
+            _save_tags,
+            format_deployments_json,
+            format_deployments_table,
+        )
 
         api_key = os.environ.get("AKASH_API_KEY")
         if not api_key:
@@ -92,46 +107,69 @@ def main():
 
         client = AkashConsoleAPI(api_key)
 
-        from .api import (
-            _extract_dseq,
-            _extract_lease_provider,
-            _extract_ssh_info,
-            _interactive_pick,
-            format_deployments_table,
-        )
-
         cmd = args.api_command
         if not cmd:
             api_p.print_help()
             sys.exit(0)
 
+        use_json = args.json or not sys.stdout.isatty()
+
         try:
             if cmd == "list":
-                print(format_deployments_table(client.list_deployments()))
+                deployments = client.list_deployments()
+                if use_json:
+                    print(format_deployments_json(deployments))
+                else:
+                    print(format_deployments_table(deployments))
 
             elif cmd == "status":
                 dseq = _resolve_dseq(args.dseq)
                 if not dseq:
                     deployments = client.list_deployments()
                     if not deployments:
-                        print("No active deployments.")
+                        if use_json:
+                            print(_json_output({"status": "down"}))
+                        else:
+                            print("No active deployments.")
                         sys.exit(0)
                     dseq = (
                         _extract_dseq(deployments[0])
                         if len(deployments) == 1
                         else _interactive_pick(deployments, client)
                     )
+                assert dseq
                 deployment = client.get_deployment(dseq)
                 dep = deployment.get("deployment", deployment)
                 state = dep.get("state", "unknown")
                 ssh = _extract_ssh_info(deployment)
-                tag = _get_tag(dseq)
-                header = f"Deployment {dseq}" + (f"  ({tag})" if tag else "")
-                print(f"{header}:")
-                print(f"  State:    {state}")
-                print(f"  Provider: {_extract_lease_provider(deployment) or 'no lease'}")
-                if ssh:
-                    print(f"  SSH:      ssh -p {ssh['port']} root@{ssh['host']}")
+
+                if use_json:
+                    canopy_status = (
+                        "ready"
+                        if state == "active"
+                        else "down"
+                        if state in ("closed", "failed")
+                        else "unknown"
+                    )
+                    result = {
+                        "dseq": dseq,
+                        "status": canopy_status,
+                        "state": state,
+                        "provider": _extract_lease_provider(deployment),
+                    }
+                    if ssh:
+                        result["endpoint"] = f"ssh -p {ssh['port']} root@{ssh['host']}"
+                        result["ssh_host"] = ssh["host"]
+                        result["ssh_port"] = ssh["port"]
+                    print(_json_output(result))
+                else:
+                    tag = _get_tag(dseq)
+                    header = f"Deployment {dseq}" + (f"  ({tag})" if tag else "")
+                    print(f"{header}:")
+                    print(f"  State:    {state}")
+                    print(f"  Provider: {_extract_lease_provider(deployment) or 'no lease'}")
+                    if ssh:
+                        print(f"  SSH:      ssh -p {ssh['port']} root@{ssh['host']}")
 
             elif cmd == "connect":
                 dseq = _resolve_dseq(args.dseq)
@@ -145,6 +183,7 @@ def main():
                         if len(deployments) == 1
                         else _interactive_pick(deployments, client)
                     )
+                assert dseq
                 deployment = client.get_deployment(dseq)
                 ssh = _extract_ssh_info(deployment)
                 if not ssh:
@@ -190,9 +229,10 @@ def main():
                         if len(deployments) == 1
                         else _interactive_pick(deployments, client)
                     )
+                assert dseq
                 tag = _get_tag(dseq)
                 label = f"{dseq} ({tag})" if tag else dseq
-                if args.yes or input(f"Close deployment {label}? (y/N) ").strip().lower() == "y":
+                if _confirm(f"Close deployment {label}? (y/N) ", yes=args.yes):
                     client.close_deployment(dseq)
                     tags = _load_tags()
                     tags.pop(dseq, None)
@@ -207,7 +247,7 @@ def main():
                     print("No deployments to close.")
                 else:
                     print(format_deployments_table(deployments))
-                    if args.yes or input("\nClose all? (y/N) ").strip().lower() == "y":
+                    if _confirm("\nClose all? (y/N) ", yes=args.yes):
                         client.close_all_deployments()
                         tags = _load_tags()
                         for d in deployments:

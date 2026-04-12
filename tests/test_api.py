@@ -1,9 +1,7 @@
 """Tests for just_akash.api — extractors, tags, API client, formatters."""
 
-import json
-import os
 import sys
-from unittest.mock import MagicMock, mock_open, patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -21,7 +19,6 @@ from just_akash.api import (
     _save_tags,
     format_deployments_table,
 )
-
 
 # ── _extract_dseq ────────────────────────────────────
 
@@ -390,7 +387,7 @@ class TestAkashConsoleAPI:
     def test_close_deployment(self, mock_req):
         mock_req.return_value = {"data": {"closed": True}}
         client = AkashConsoleAPI("key")
-        result = client.close_deployment("12345")
+        client.close_deployment("12345")
         mock_req.assert_called_once_with("DELETE", "/v1/deployments/12345")
 
     @patch.object(AkashConsoleAPI, "close_deployment")
@@ -467,7 +464,7 @@ class TestAkashConsoleAPI:
     def test_create_lease(self, mock_req):
         mock_req.return_value = {"data": {"lease": "created"}}
         client = AkashConsoleAPI("key")
-        result = client.create_lease("12345", "akash1prov", "manifest-str")
+        client.create_lease("12345", "akash1prov", "manifest-str")
         mock_req.assert_called_once_with(
             "POST",
             "/v1/leases",

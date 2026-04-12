@@ -1,9 +1,8 @@
 """Tests for remaining uncovered paths — api_main, deploy_main."""
 
-import json
 import os
 import sys
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 import pytest
 
@@ -44,6 +43,7 @@ class TestApiMain:
     def test_list(self, MockAPI, mock_fmt, monkeypatch, capsys):
         monkeypatch.setenv("AKASH_API_KEY", "test-key")
         monkeypatch.setattr(sys, "argv", ["api", "list"])
+        monkeypatch.setattr(sys.stdout, "isatty", lambda: True)
         client = MockAPI.return_value
         client.list_deployments.return_value = []
         from just_akash.api import api_main
@@ -307,8 +307,8 @@ class TestApiMain:
         client.list_deployments.return_value = [{"dseq": "12345"}]
         client.close_deployment.return_value = {"data": {"closed": True}}
         monkeypatch.setattr("builtins.input", lambda _: "y")
-        from just_akash.api import api_main
         import just_akash.api as api_mod
+        from just_akash.api import api_main
 
         monkeypatch.setattr(api_mod, "TAGS_FILE", tmp_path / ".tags.json")
         api_main()
@@ -337,8 +337,8 @@ class TestApiMain:
         client.list_deployments.return_value = [{"dseq": "1"}]
         client.close_all_deployments.return_value = {"closed": [True]}
         monkeypatch.setattr("builtins.input", lambda _: "y")
-        from just_akash.api import api_main
         import just_akash.api as api_mod
+        from just_akash.api import api_main
 
         monkeypatch.setattr(api_mod, "TAGS_FILE", tmp_path / ".tags.json")
         api_main()

@@ -1,9 +1,8 @@
 """Tests for just_akash.cli — command dispatch logic."""
 
-import json
 import os
 import sys
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 import pytest
 
@@ -59,13 +58,23 @@ class TestCliApiNoSubcommand:
 class TestCliApiList:
     @patch("just_akash.api.format_deployments_table", return_value="table output")
     @patch("just_akash.api.AkashConsoleAPI")
-    def test_api_list(self, MockAPI, mock_fmt, monkeypatch, capsys):
+    def test_api_list_tty(self, MockAPI, mock_fmt, monkeypatch, capsys):
+        monkeypatch.setenv("AKASH_API_KEY", "test-key")
+        client = MockAPI.return_value
+        client.list_deployments.return_value = []
+        monkeypatch.setattr(sys.stdout, "isatty", lambda: True)
+        _run_cli(monkeypatch, ["just-akash", "api", "list"])
+        captured = capsys.readouterr()
+        assert "table output" in captured.out
+
+    @patch("just_akash.api.AkashConsoleAPI")
+    def test_api_list_json(self, MockAPI, monkeypatch, capsys):
         monkeypatch.setenv("AKASH_API_KEY", "test-key")
         client = MockAPI.return_value
         client.list_deployments.return_value = []
         _run_cli(monkeypatch, ["just-akash", "api", "list"])
         captured = capsys.readouterr()
-        assert "table output" in captured.out
+        assert "[]" in captured.out
 
 
 class TestCliApiStatusWithDseq:
@@ -94,6 +103,7 @@ class TestCliApiStatusNoDeployments:
         monkeypatch.setenv("AKASH_API_KEY", "test-key")
         client = MockAPI.return_value
         client.list_deployments.return_value = []
+        monkeypatch.setattr(sys.stdout, "isatty", lambda: True)
         with pytest.raises(SystemExit) as exc_info:
             _run_cli(monkeypatch, ["just-akash", "api", "status"])
         assert exc_info.value.code == 0

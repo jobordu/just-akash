@@ -1,6 +1,6 @@
 [project]
 name = "just-akash"
-version = "1.1.0"
+version = "1.2.0"
 description = "Justfile recipes + Python CLI for deploying on Akash Network via the Console API"
 readme = "README.md"
 license = "MIT"
@@ -26,6 +26,10 @@ select = ["E", "F", "I", "UP", "B", "SIM"]
 testpaths = ["tests"]
 addopts = "--cov=just_akash --cov-report=term-missing"
 
+[tool.pyright]
+pythonVersion = "3.10"
+typeCheckingMode = "basic"
+
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
@@ -34,5 +38,6 @@ build-backend = "hatchling.build"
 dev = [
     "pytest>=9.0.3",
     "pytest-cov>=7.1.0",
+    "pyright>=1.1.399",
     "ruff>=0.15.10",
 ]

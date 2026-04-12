@@ -134,6 +134,10 @@ test timeout="240":
 lint:
     uv run ruff check . && uv run ruff format --check .
 
+# Run pyright type check
+typecheck:
+    uv run pyright
+
 # Run ruff format (auto-fix)
 fmt:
     uv run ruff format .

@@ -42,7 +42,7 @@ def log_info(msg):
     print(f"  {YELLOW}INFO{RESET} {msg}")
 
 
-def run(cmd: str, timeout: int = 60, input_text: str = None) -> subprocess.CompletedProcess:
+def run(cmd: str, timeout: int = 60, input_text: str | None = None) -> subprocess.CompletedProcess:
     return subprocess.run(
         cmd,
         shell=True,

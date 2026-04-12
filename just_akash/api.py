@@ -4,7 +4,8 @@ Akash Console API client with CLI dispatch.
 
 Provides:
 - AkashConsoleAPI class for interacting with Akash Console API
-- CLI subcommands: list, status, close, close-all, logs, shell, tag
+- CLI subcommands: list, status, close, close-all, tag
+- Shared helpers: _confirm, _json_output
 """
 
 import json
@@ -56,6 +57,16 @@ def _resolve_dseq(identifier: str) -> str:
     print(f"Error: No deployment found with tag '{identifier}'")
     print(f"Active tags: {', '.join(tags.values()) or 'none'}")
     sys.exit(1)
+
+
+def _confirm(prompt: str, yes: bool = False) -> bool:
+    if yes:
+        return True
+    return input(prompt).strip().lower() == "y"
+
+
+def _json_output(data: dict[str, Any] | list[Any]) -> str:
+    return json.dumps(data, indent=2)
 
 
 class AkashConsoleAPI:
@@ -282,6 +293,27 @@ def format_deployments_table(deployments: list[dict[str, Any]]) -> str:
     return "\n".join(lines)
 
 
+def format_deployments_json(deployments: list[dict[str, Any]]) -> str:
+    tags = _load_tags()
+    rows = []
+    for d in deployments:
+        dseq = _extract_dseq(d) or "?"
+        dep = d.get("deployment", d)
+        state = dep.get("state", "unknown")
+        provider = _extract_lease_provider(d)
+        ssh = _extract_ssh_info(d)
+        rows.append(
+            {
+                "dseq": dseq,
+                "tag": tags.get(dseq, ""),
+                "state": state,
+                "provider": provider or "no lease",
+                "ssh": f"{ssh['host']}:{ssh['port']}" if ssh else None,
+            }
+        )
+    return _json_output(rows)
+
+
 def _interactive_pick(deployments: list[dict[str, Any]], client: "AkashConsoleAPI") -> str:
     import termios
     import tty
@@ -368,6 +400,7 @@ def api_main():
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     parser.add_argument("-y", "--yes", action="store_true", help="Skip confirmation prompts")
+    parser.add_argument("--json", action="store_true", help="Output in JSON format")
     subparsers = parser.add_subparsers(dest="command", help="Command to run")
 
     subparsers.add_parser("list", help="List all active deployments")
@@ -394,24 +427,30 @@ def api_main():
         parser.print_help()
         sys.exit(0)
 
+    use_json = args.json or not sys.stdout.isatty()
+
     try:
         if args.command == "list":
             deployments = client.list_deployments()
-            print(format_deployments_table(deployments))
+            if use_json:
+                print(format_deployments_json(deployments))
+            else:
+                print(format_deployments_table(deployments))
 
         elif args.command == "status":
             dseq = _resolve_dseq(args.dseq)
             if not dseq:
                 deployments = client.list_deployments()
                 if not deployments:
-                    if not sys.stdout.isatty():
-                        print(json.dumps({"status": "down"}))
+                    if use_json:
+                        print(_json_output({"status": "down"}))
                     else:
                         print("No active deployments.")
                     sys.exit(0)
                 if len(deployments) == 1:
                     dseq = _extract_dseq(deployments[0])
-                    if sys.stdout.isatty():
+                    assert dseq
+                    if not use_json:
                         print(f"Auto-selected deployment {dseq}\n")
                 else:
                     dseq = _interactive_pick(deployments, client)
@@ -421,7 +460,7 @@ def api_main():
 
             ssh = _extract_ssh_info(deployment)
 
-            if not sys.stdout.isatty():
+            if use_json:
                 canopy_status = (
                     "ready"
                     if state == "active"
@@ -429,10 +468,17 @@ def api_main():
                     if state in ("closed", "failed")
                     else "unknown"
                 )
-                result: dict[str, Any] = {"status": canopy_status}
+                result: dict[str, Any] = {
+                    "dseq": dseq,
+                    "status": canopy_status,
+                    "state": state,
+                    "provider": _extract_lease_provider(deployment),
+                }
                 if ssh:
                     result["endpoint"] = f"ssh -p {ssh['port']} root@{ssh['host']}"
-                print(json.dumps(result))
+                    result["ssh_host"] = ssh["host"]
+                    result["ssh_port"] = ssh["port"]
+                print(_json_output(result))
             else:
                 tag = _get_tag(dseq)
                 header = f"Deployment {dseq}"
@@ -476,10 +522,12 @@ def api_main():
                     sys.exit(1)
                 if len(deployments) == 1:
                     dseq = _extract_dseq(deployments[0])
+                    assert dseq
                     print(f"Auto-selected deployment {dseq}")
                 else:
                     dseq = _interactive_pick(deployments, client)
 
+            assert dseq
             deployment = client.get_deployment(dseq)
             ssh = _extract_ssh_info(deployment)
             if not ssh:
@@ -528,13 +576,15 @@ def api_main():
                     sys.exit(0)
                 if len(deployments) == 1:
                     dseq = _extract_dseq(deployments[0])
+                    assert dseq
                     print(f"Auto-selected deployment {dseq}")
                 else:
                     dseq = _interactive_pick(deployments, client)
 
+            assert dseq
             tag = _get_tag(dseq)
             label = f"{dseq} ({tag})" if tag else dseq
-            if args.yes or input(f"Close deployment {label}? (y/N) ").strip().lower() == "y":
+            if _confirm(f"Close deployment {label}? (y/N) ", yes=args.yes):
                 client.close_deployment(dseq)
                 tags = _load_tags()
                 tags.pop(dseq, None)
@@ -550,7 +600,7 @@ def api_main():
             else:
                 print(f"Found {len(deployments)} active deployment(s):")
                 print(format_deployments_table(deployments))
-                if args.yes or input("\nClose all? (y/N) ").strip().lower() == "y":
+                if _confirm("\nClose all? (y/N) ", yes=args.yes):
                     client.close_all_deployments()
                     tags = _load_tags()
                     for d in deployments:

@@ -6,6 +6,24 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [1.2.0] — 2026-04-12
+
+### Added
+- `--json` flag on `list`, `status`, `close`, `close-all` commands for explicit JSON output (also auto-enables when stdout is not a TTY)
+- `format_deployments_json()` for machine-readable deployment listing
+- `_confirm()` helper to DRY confirmation prompts across `cli.py` and `api.py`
+- `pyright` type checking in dev dependencies, CI workflow, and `just typecheck` recipe
+- 20 new tests: interactive picker (arrow keys, q/ctrl-c, tags+SSH), `_confirm`, `format_deployments_json`, `get_provider` response shapes
+- `just typecheck` Justfile recipe
+
+### Changed
+- Confirmation prompts now use shared `_confirm()` instead of duplicated `input()` logic
+- `use_json` detection unified: `args.json or not sys.stdout.isatty()`
+- Fixed 15 pyright type errors (assertions on `_extract_dseq()` `str|None` returns)
+
+### Fixed
+- All pre-existing lint issues in test files (unused imports, unsorted imports)
+
 ## [1.1.0] — 2026-04-12
 
 ### Changed

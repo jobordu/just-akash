@@ -1,10 +1,6 @@
 """Tests for just_akash.deploy — deployment orchestrator."""
 
-import json
-import os
-import re
-import time
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 import pytest
 
