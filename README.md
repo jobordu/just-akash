@@ -36,12 +36,12 @@ uv run pre-commit install   # install gitleaks + ruff hooks
 | Command | Usage | Purpose |
 |---------|-------|---------|
 | `just up [tag]` | `just up my-web-app` | Deploy SSH-enabled instance (polls bids, picks cheapest) |
-| `just connect [dseq|tag]` | `just connect 12345`<br>`just connect my-web-app` | SSH into a running instance |
-| `just down [dseq|tag]` | `just down 12345`<br>`just down my-web-app` | Stop an instance |
+| `just connect [dseq|tag]` | `just connect 12345` or `just connect my-web-app` | SSH into a running instance |
+| `just down [dseq|tag]` | `just down 12345` or `just down my-web-app` | Stop an instance |
 | `just down-all` | `just down-all` | Stop all instances |
 | `just tag DSEQ NAME` | `just tag 12345 my-database` | Tag a deployment with a name |
 | `just ls` | `just ls` | List active instances |
-| `just status [dseq|tag]` | `just status 12345`<br>`just status my-database` | Show instance details |
+| `just status [dseq|tag]` | `just status 12345` or `just status my-database` | Show instance details |
 | `just test` | `just test` | Full lifecycle test (up → verify → SSH → down → cleanup) |
 | `just lint` | `just lint` | Ruff lint + format check |
 | `just secrets` | `just secrets` | Gitleaks secret scan |
