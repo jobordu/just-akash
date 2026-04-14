@@ -50,8 +50,12 @@ def _log_bid_table(bids: list, label: str):
         return
     _log(logging.INFO, f"  {label}: {len(bids)} bid(s)")
     for i, b in enumerate(bids):
+        if not isinstance(b, dict):
+            _log(logging.INFO, f"    [{i + 1}] (invalid bid entry)")
+            continue
         provider = _extract_provider(b) or "unknown"
-        state = b.get("state", b.get("bid", {}).get("state", "?"))
+        _nested = b.get("bid", {})
+        state = b.get("state", _nested.get("state", "?") if isinstance(_nested, dict) else "?")
         _log(
             logging.INFO,
             f"    [{i + 1}] provider={provider}  price={_fmt_price(b)}  state={state}",
@@ -100,8 +104,9 @@ def deploy(
     if image:
         sdl_content = re.sub(
             r"image:\s+[^\n]+",
-            f"image: {image}",
+            lambda _: f"image: {image}",
             sdl_content,
+            count=1,
         )
         _log(logging.INFO, f"Overrode image to: {image}")
 
@@ -127,8 +132,9 @@ def deploy(
         raise RuntimeError(f"Failed to create deployment: {e}") from e
 
     dseq = deployment_response.get("dseq")
-    manifest = deployment_response.get("manifest", "")
-    if not dseq:
+    _manifest_raw = deployment_response.get("manifest", "")
+    manifest = _manifest_raw if isinstance(_manifest_raw, str) else ""
+    if dseq is None:
         _log(
             logging.ERROR,
             f"No DSEQ in response: {json.dumps(deployment_response, default=str)}",
@@ -186,8 +192,14 @@ def deploy(
                         f"  poll #{poll_count} @ {elapsed}s: {current_count} bid(s) received",
                     )
                     for i, b in enumerate(bids):
+                        if not isinstance(b, dict):
+                            continue
                         p = _extract_provider(b) or "unknown"
-                        s = b.get("state", b.get("bid", {}).get("state", "?"))
+                        nested = b.get("bid", {})
+                        nested_state = (
+                            nested.get("state", "?") if isinstance(nested, dict) else "?"
+                        )
+                        s = b.get("state", nested_state)
                         if allowed:
                             in_allowlist = "ALLOWED" if p in allowed else "FOREIGN"
                         else:
@@ -231,6 +243,12 @@ def deploy(
             "Possible causes: SDL unsatisfiable, providers offline, network partition, "
             "deposit too low, or no capacity on allowed providers",
         )
+        _log(logging.INFO, f"Cleaning up deployment {dseq} (no bids)...")
+        try:
+            client.close_deployment(str(dseq))
+            _log(logging.INFO, f"Deployment {dseq} closed after no bids received")
+        except Exception as cleanup_err:
+            _log(logging.ERROR, f"Cleanup of deployment {dseq} failed: {cleanup_err}")
         raise RuntimeError(
             f"No bids received within {bid_wait + bid_wait_retry}s. "
             "Your SDL may be unsatisfiable or all providers are busy."
@@ -255,9 +273,15 @@ def deploy(
                         online = prov_info.get("isOnline")
                         valid = prov_info.get("isValidVersion")
                         uptime = prov_info.get("uptime1d")
-                        stats = prov_info.get("stats", {})
-                        cpu = stats.get("cpu", {})
-                        mem = stats.get("memory", {})
+                        stats = prov_info.get("stats") or {}
+                        if not isinstance(stats, dict):
+                            stats = {}
+                        cpu = stats.get("cpu") or {}
+                        if not isinstance(cpu, dict):
+                            cpu = {}
+                        mem = stats.get("memory") or {}
+                        if not isinstance(mem, dict):
+                            mem = {}
                         _log(
                             logging.WARNING,
                             f"    on-chain status: isOnline={online} "
@@ -278,8 +302,10 @@ def deploy(
     # Step 4: Filter bids to allowed providers
     _log(logging.INFO, "STEP 4: Filtering bids...")
     if allowed:
-        our_bids = [b for b in bids if _extract_provider(b) in allowed]
-        foreign_bids = [b for b in bids if _extract_provider(b) not in allowed]
+        our_bids = [b for b in bids if isinstance(b, dict) and _extract_provider(b) in allowed]
+        foreign_bids = [
+            b for b in bids if isinstance(b, dict) and _extract_provider(b) not in allowed
+        ]
 
         _log_bid_table(our_bids, "ALLOWED PROVIDERS")
         _log_bid_table(foreign_bids, "FOREIGN (rejected)")
@@ -289,6 +315,12 @@ def deploy(
             _log(logging.ERROR, f"All {len(bids)} bid(s) are from non-allowed providers")
             _log(logging.ERROR, f"  Allowed: {allowed}")
             _log(logging.ERROR, f"  Received from: {foreign}")
+            _log(logging.INFO, f"Cleaning up deployment {dseq} (foreign bids only)...")
+            try:
+                client.close_deployment(str(dseq))
+                _log(logging.INFO, f"Deployment {dseq} closed after foreign bids rejection")
+            except Exception as cleanup_err:
+                _log(logging.ERROR, f"Cleanup of deployment {dseq} failed: {cleanup_err}")
             raise RuntimeError(
                 f"Received {len(bids)} bid(s) but NONE from our providers.\n"
                 f"  Allowed: {allowed}\n"
@@ -296,8 +328,16 @@ def deploy(
                 "Check that your providers are online and have capacity."
             )
     else:
-        our_bids = bids
+        our_bids = [b for b in bids if isinstance(b, dict)]
         _log_bid_table(our_bids, "ALL BIDS (no allowlist)")
+        if not our_bids:
+            _log(logging.ERROR, f"All {len(bids)} bid(s) are invalid (non-dict entries)")
+            _log(logging.INFO, f"Cleaning up deployment {dseq} (no valid bids)...")
+            try:
+                client.close_deployment(str(dseq))
+            except Exception as cleanup_err:
+                _log(logging.ERROR, f"Cleanup of deployment {dseq} failed: {cleanup_err}")
+            raise RuntimeError("No valid bids received — all bid entries were malformed.")
 
     # Step 5: Select cheapest bid
     _log(logging.INFO, "STEP 5: Selecting cheapest bid from allowed providers...")
@@ -311,6 +351,12 @@ def deploy(
     price_amount, price_denom = _extract_bid_price(cheapest_bid)
 
     if not provider:
+        _log(logging.INFO, f"Cleaning up deployment {dseq} (no provider in bid)...")
+        try:
+            client.close_deployment(str(dseq))
+            _log(logging.INFO, f"Deployment {dseq} closed after no-provider bid")
+        except Exception as cleanup_err:
+            _log(logging.ERROR, f"Cleanup of deployment {dseq} failed: {cleanup_err}")
         raise RuntimeError("Selected bid has no provider address")
 
     _log(
@@ -328,6 +374,12 @@ def deploy(
         )
     except RuntimeError as e:
         _log(logging.ERROR, f"Lease creation FAILED: {e}")
+        _log(logging.INFO, f"Cleaning up deployment {dseq}...")
+        try:
+            client.close_deployment(str(dseq))
+            _log(logging.INFO, f"Deployment {dseq} closed after lease failure")
+        except Exception as cleanup_err:
+            _log(logging.ERROR, f"Cleanup of deployment {dseq} also failed: {cleanup_err}")
         raise RuntimeError(f"Failed to create lease: {e}") from e
 
     _log(logging.INFO, "Lease created successfully!")

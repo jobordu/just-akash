@@ -137,10 +137,13 @@ def main():
                         if len(deployments) == 1
                         else _interactive_pick(deployments, client)
                     )
-                assert dseq
+                if not dseq:
+                    raise RuntimeError("No deployment selected")
                 deployment = client.get_deployment(dseq)
                 dep = deployment.get("deployment", deployment)
-                state = dep.get("state", "unknown")
+                if not isinstance(dep, dict):
+                    dep = deployment
+                state = dep.get("state", "unknown") if isinstance(dep, dict) else "unknown"
                 ssh = _extract_ssh_info(deployment)
 
                 if use_json:
@@ -183,7 +186,8 @@ def main():
                         if len(deployments) == 1
                         else _interactive_pick(deployments, client)
                     )
-                assert dseq
+                if not dseq:
+                    raise RuntimeError("No deployment selected")
                 deployment = client.get_deployment(dseq)
                 ssh = _extract_ssh_info(deployment)
                 if not ssh:
@@ -229,7 +233,8 @@ def main():
                         if len(deployments) == 1
                         else _interactive_pick(deployments, client)
                     )
-                assert dseq
+                if not dseq:
+                    raise RuntimeError("No deployment selected")
                 tag = _get_tag(dseq)
                 label = f"{dseq} ({tag})" if tag else dseq
                 if _confirm(f"Close deployment {label}? (y/N) ", yes=args.yes):

@@ -12,6 +12,7 @@ import json
 import logging
 import os
 import sys
+import tempfile
 import urllib.error
 import urllib.request
 from datetime import datetime, timezone
@@ -31,14 +32,23 @@ TAGS_FILE = Path(__file__).resolve().parent.parent / ".tags.json"
 def _load_tags() -> dict[str, str]:
     if TAGS_FILE.exists():
         try:
-            return json.loads(TAGS_FILE.read_text())
+            data = json.loads(TAGS_FILE.read_text())
+            return data if isinstance(data, dict) else {}
         except (json.JSONDecodeError, OSError):
             return {}
     return {}
 
 
 def _save_tags(tags: dict[str, str]):
-    TAGS_FILE.write_text(json.dumps(tags, indent=2) + "\n")
+    content = json.dumps(tags, indent=2) + "\n"
+    fd, tmp_path = tempfile.mkstemp(dir=TAGS_FILE.parent, suffix=".tmp")
+    try:
+        with os.fdopen(fd, "w") as f:
+            f.write(content)
+        os.replace(tmp_path, str(TAGS_FILE))
+    except BaseException:
+        os.unlink(tmp_path) if os.path.exists(tmp_path) else None
+        raise
 
 
 def _get_tag(dseq: str) -> str:
@@ -48,12 +58,12 @@ def _get_tag(dseq: str) -> str:
 def _resolve_dseq(identifier: str) -> str:
     if not identifier:
         return ""
-    if identifier.isdigit():
-        return identifier
     tags = _load_tags()
     for dseq, tag in tags.items():
         if tag == identifier:
             return dseq
+    if identifier.isdigit():
+        return identifier
     print(f"Error: No deployment found with tag '{identifier}'")
     print(f"Active tags: {', '.join(tags.values()) or 'none'}")
     sys.exit(1)
@@ -62,7 +72,10 @@ def _resolve_dseq(identifier: str) -> str:
 def _confirm(prompt: str, yes: bool = False) -> bool:
     if yes:
         return True
-    return input(prompt).strip().lower() == "y"
+    try:
+        return input(prompt).strip().lower() == "y"
+    except (EOFError, KeyboardInterrupt):
+        return False
 
 
 def _json_output(data: dict[str, Any] | list[Any]) -> str:
@@ -87,7 +100,7 @@ class AkashConsoleAPI:
         method: str,
         endpoint: str,
         data: dict[str, Any] | None = None,
-    ) -> dict[str, Any]:
+    ) -> Any:
         url = f"{self.base_url}{endpoint}"
 
         logger.debug(
@@ -108,7 +121,15 @@ class AkashConsoleAPI:
             with urllib.request.urlopen(req) as response:
                 response_data = response.read().decode("utf-8")
                 elapsed_ms = int((datetime.now(timezone.utc) - t0).total_seconds() * 1000)
-                result = json.loads(response_data) if response_data else {}
+                if response_data:
+                    try:
+                        result = json.loads(response_data)
+                        if not isinstance(result, (dict, list)):
+                            result = {"raw": result}
+                    except json.JSONDecodeError:
+                        result = {"raw": response_data}
+                else:
+                    result = {}
                 logger.debug(
                     f"[{_ts()}] API {method} {endpoint} -> "
                     f"{response.status} ({elapsed_ms}ms) keys="
@@ -124,7 +145,11 @@ class AkashConsoleAPI:
             )
             try:
                 error_json = json.loads(error_body)
-                error_msg = error_json.get("message", error_body)
+                error_msg = (
+                    error_json.get("message", error_body)
+                    if isinstance(error_json, dict)
+                    else error_body
+                )
             except json.JSONDecodeError:
                 error_msg = error_body
             raise RuntimeError(f"API Error ({e.code}): {error_msg}") from e
@@ -134,17 +159,40 @@ class AkashConsoleAPI:
 
     def list_deployments(self, active_only: bool = True) -> list[dict[str, Any]]:
         response = self._request("GET", "/v1/deployments")
+        if not isinstance(response, dict):
+            return []
         data = response.get("data", response)
-        deployments = data.get("deployments", [])
+        if isinstance(data, list):
+            deployments = [d for d in data if isinstance(d, dict)]
+        elif isinstance(data, dict):
+            raw = data.get("deployments", [])
+            deployments = raw if isinstance(raw, list) else []
+        else:
+            deployments = []
         if active_only:
-            deployments = [
-                d for d in deployments if d.get("deployment", {}).get("state") == "active"
-            ]
+            result = []
+            for d in deployments:
+                if not isinstance(d, dict):
+                    continue
+                dep_field = d.get("deployment", {})
+                if not isinstance(dep_field, dict):
+                    continue
+                if dep_field.get("state") == "active":
+                    result.append(d)
+            deployments = result
         return deployments
 
     def get_deployment(self, dseq: str) -> dict[str, Any]:
         response = self._request("GET", f"/v1/deployments/{dseq}")
-        return response.get("data", response)
+        if not isinstance(response, dict):
+            return {}
+        data = response.get("data", response)
+        if isinstance(data, dict):
+            return data
+        if isinstance(data, list):
+            first = data[0] if data else {}
+            return first if isinstance(first, dict) else response
+        return response
 
     def create_deployment(self, sdl_content: str, deposit: float = 5.0) -> dict[str, Any]:
         response = self._request(
@@ -152,12 +200,17 @@ class AkashConsoleAPI:
             "/v1/deployments",
             {"data": {"sdl": sdl_content, "deposit": deposit}},
         )
+        if not isinstance(response, dict):
+            return response if isinstance(response, dict) else {}
         data = response.get("data", response)
-        return data
+        return data if isinstance(data, dict) else response
 
     def close_deployment(self, dseq: str) -> dict[str, Any]:
         response = self._request("DELETE", f"/v1/deployments/{dseq}")
-        return response.get("data", response)
+        if not isinstance(response, dict):
+            return {}
+        data = response.get("data", response)
+        return data if isinstance(data, dict) else response
 
     def close_all_deployments(self) -> dict[str, Any]:
         deployments = self.list_deployments()
@@ -169,16 +222,21 @@ class AkashConsoleAPI:
             try:
                 result = self.close_deployment(dep_dseq)
                 results.append(result)
-            except RuntimeError as e:
+            except Exception as e:
                 print(f"Warning: Failed to close deployment {dep_dseq}: {e}")
         return {"closed": results}
 
     def get_bids(self, dseq: str) -> list[dict[str, Any]]:
         response = self._request("GET", f"/v1/bids?dseq={dseq}")
+        if not isinstance(response, dict):
+            return []
         data = response.get("data", response)
         if isinstance(data, list):
             return data
-        return data.get("bids", [])
+        if isinstance(data, dict):
+            bids = data.get("bids")
+            return bids if isinstance(bids, list) else []
+        return []
 
     def get_provider(self, owner: str) -> dict[str, Any] | None:
         try:
@@ -187,7 +245,13 @@ class AkashConsoleAPI:
                 providers = response
             elif isinstance(response, dict):
                 data = response.get("data", response)
-                providers = data if isinstance(data, list) else data.get("providers", [])
+                if isinstance(data, list):
+                    providers = data
+                elif isinstance(data, dict):
+                    raw = data.get("providers", [])
+                    providers = raw if isinstance(raw, list) else []
+                else:
+                    providers = []
             else:
                 providers = []
             for p in providers:
@@ -200,7 +264,7 @@ class AkashConsoleAPI:
     def create_lease(
         self, dseq: str, provider: str, manifest: str, gseq: int = 1, oseq: int = 1
     ) -> dict[str, Any]:
-        return self._request(
+        response = self._request(
             "POST",
             "/v1/leases",
             {
@@ -215,53 +279,96 @@ class AkashConsoleAPI:
                 ],
             },
         )
+        if not isinstance(response, dict):
+            return {}
+        return response
 
 
 def _extract_dseq(deployment: dict[str, Any]) -> str | None:
+    if not isinstance(deployment, dict):
+        return None
     if "dseq" in deployment:
-        return str(deployment["dseq"])
+        val = deployment["dseq"]
+        return str(val) if val is not None else None
     dep = deployment.get("deployment", {})
+    if not isinstance(dep, dict):
+        return None
     dep_id = dep.get("id", {})
+    if not isinstance(dep_id, dict):
+        return None
     if "dseq" in dep_id:
-        return str(dep_id["dseq"])
+        val = dep_id["dseq"]
+        return str(val) if val is not None else None
     return None
 
 
 def _extract_provider(bid: dict[str, Any]) -> str | None:
-    bid_id = bid.get("id", bid.get("bid", {}).get("id", {}))
-    if "provider" in bid_id:
+    if not isinstance(bid, dict):
+        return None
+    nested = bid.get("bid", {})
+    nested_id = nested.get("id", {}) if isinstance(nested, dict) else {}
+    bid_id = bid.get("id", nested_id)
+    if isinstance(bid_id, dict) and "provider" in bid_id:
         return bid_id["provider"]
     return bid.get("provider")
 
 
 def _extract_bid_price(bid: dict[str, Any]) -> tuple:
-    price = bid.get("price", bid.get("bid", {}).get("price", {}))
+    if not isinstance(bid, dict):
+        return (float("inf"), "uakt")
+    nested = bid.get("bid", {})
+    nested_price = nested.get("price", {}) if isinstance(nested, dict) else {}
+    price = bid.get("price", nested_price)
     if isinstance(price, dict):
-        amount = float(price.get("amount", float("inf")))
+        raw_amount = price.get("amount", float("inf"))
+        try:
+            amount = float(raw_amount)
+        except (TypeError, ValueError):
+            amount = float("inf")
         denom = price.get("denom", "uakt")
         return (amount, denom)
-    return (float(price) if price else float("inf"), "uakt")
+    try:
+        return (float(price) if price else float("inf"), "uakt")
+    except (TypeError, ValueError):
+        return (float("inf"), "uakt")
 
 
 def _extract_ssh_info(deployment: dict[str, Any]) -> dict[str, Any] | None:
-    for lease in deployment.get("leases", []):
+    leases = deployment.get("leases")
+    for lease in leases if isinstance(leases, list) else []:
+        if not isinstance(lease, dict):
+            continue
         status = lease.get("status") or {}
+        if not isinstance(status, dict):
+            continue
         fwd_ports = status.get("forwarded_ports") or {}
+        if not isinstance(fwd_ports, dict):
+            continue
         for svc_name, ports in fwd_ports.items():
+            if not isinstance(ports, list):
+                continue
             for p in ports:
+                if not isinstance(p, dict):
+                    continue
                 if p.get("port") == 22:
-                    return {
-                        "host": p["host"],
-                        "port": p["externalPort"],
-                        "service": svc_name,
-                    }
+                    host = p.get("host")
+                    external_port = p.get("externalPort")
+                    if host is not None and external_port is not None:
+                        return {
+                            "host": host,
+                            "port": external_port,
+                            "service": svc_name,
+                        }
     return None
 
 
 def _extract_lease_provider(deployment: dict[str, Any]) -> str | None:
-    for lease in deployment.get("leases", []):
+    leases = deployment.get("leases")
+    for lease in leases if isinstance(leases, list) else []:
+        if not isinstance(lease, dict):
+            continue
         lease_id = lease.get("id", {})
-        if "provider" in lease_id:
+        if isinstance(lease_id, dict) and "provider" in lease_id:
             return lease_id["provider"]
     return None
 
@@ -273,16 +380,23 @@ def format_deployments_table(deployments: list[dict[str, Any]]) -> str:
     tags = _load_tags()
     rows = []
     for d in deployments:
+        if not isinstance(d, dict):
+            continue
         dseq = _extract_dseq(d) or "?"
         tag = tags.get(dseq, "")
         dep = d.get("deployment", d)
-        state = dep.get("state", "unknown")
-        provider = _extract_lease_provider(d) or "no lease"
+        if not isinstance(dep, dict):
+            dep = d
+        state = str(dep.get("state", "unknown") if isinstance(dep, dict) else "unknown")
+        _provider = _extract_lease_provider(d)
+        provider = str(_provider) if _provider is not None else "no lease"
         ssh = _extract_ssh_info(d)
         ssh_col = f"{ssh['host']}:{ssh['port']}" if ssh else "-"
         rows.append((dseq, tag, state, provider[:20], ssh_col))
 
     headers = ("DSEQ", "Tag", "State", "Provider", "SSH")
+    if not rows:
+        return "No active deployments."
     widths = [max(len(h), max(len(r[i]) for r in rows)) for i, h in enumerate(headers)]
 
     lines = ["  ".join(h.ljust(w) for h, w in zip(headers, widths, strict=False))]
@@ -297,9 +411,13 @@ def format_deployments_json(deployments: list[dict[str, Any]]) -> str:
     tags = _load_tags()
     rows = []
     for d in deployments:
+        if not isinstance(d, dict):
+            continue
         dseq = _extract_dseq(d) or "?"
         dep = d.get("deployment", d)
-        state = dep.get("state", "unknown")
+        if not isinstance(dep, dict):
+            dep = d
+        state = dep.get("state", "unknown") if isinstance(dep, dict) else "unknown"
         provider = _extract_lease_provider(d)
         ssh = _extract_ssh_info(d)
         rows.append(
@@ -318,7 +436,12 @@ def _interactive_pick(deployments: list[dict[str, Any]], client: "AkashConsoleAP
     import termios
     import tty
 
+    if not deployments:
+        raise ValueError("No deployments to pick from")
+
     if not sys.stdin.isatty():
+        if not isinstance(deployments[0], dict):
+            raise ValueError("Deployment entry is not a dict")
         dseq = _extract_dseq(deployments[0])
         if not dseq:
             raise RuntimeError("Could not extract dseq from deployment")
@@ -327,6 +450,8 @@ def _interactive_pick(deployments: list[dict[str, Any]], client: "AkashConsoleAP
     tags = _load_tags()
     items = []
     for d in deployments:
+        if not isinstance(d, dict):
+            continue
         dseq = _extract_dseq(d) or "?"
         tag = tags.get(dseq, "")
         provider = (_extract_lease_provider(d) or "no lease")[:24]
@@ -334,6 +459,9 @@ def _interactive_pick(deployments: list[dict[str, Any]], client: "AkashConsoleAP
         ssh_str = f"{ssh['host']}:{ssh['port']}" if ssh else "no SSH"
         label = f"{dseq}  {tag}" if tag else dseq
         items.append((dseq, label, provider, ssh_str))
+
+    if not items:
+        raise ValueError("No deployments to pick from")
 
     selected = 0
     fd = sys.stdin.fileno()
@@ -449,14 +577,17 @@ def api_main():
                     sys.exit(0)
                 if len(deployments) == 1:
                     dseq = _extract_dseq(deployments[0])
-                    assert dseq
+                    if not dseq:
+                        raise RuntimeError("Could not extract dseq from deployment")
                     if not use_json:
                         print(f"Auto-selected deployment {dseq}\n")
                 else:
                     dseq = _interactive_pick(deployments, client)
             deployment = client.get_deployment(dseq)
             dep = deployment.get("deployment", deployment)
-            state = dep.get("state", "unknown")
+            if not isinstance(dep, dict):
+                dep = deployment
+            state = dep.get("state", "unknown") if isinstance(dep, dict) else "unknown"
 
             ssh = _extract_ssh_info(deployment)
 
@@ -491,27 +622,52 @@ def api_main():
                 if ssh:
                     print(f"  SSH:      ssh -p {ssh['port']} root@{ssh['host']}")
 
-                for lease in deployment.get("leases", []):
+                _leases = deployment.get("leases")
+                for lease in _leases if isinstance(_leases, list) else []:
+                    if not isinstance(lease, dict):
+                        continue
                     lease_status = lease.get("status") or {}
+                    if not isinstance(lease_status, dict):
+                        continue
                     fwd = lease_status.get("forwarded_ports") or {}
+                    if not isinstance(fwd, dict):
+                        fwd = {}
                     for svc, ports in fwd.items():
+                        if not isinstance(ports, list):
+                            continue
                         for p in ports:
-                            if p.get("port") != 22:
+                            if not isinstance(p, dict):
+                                continue
+                            p_port = p.get("port")
+                            if p_port is not None and p_port != 22:
+                                p_host = p.get("host", "?")
+                                p_ext = p.get("externalPort", "?")
                                 print(
-                                    f"  Port:     {p['host']}:{p['externalPort']} "
-                                    f"→ {p['port']}/{p.get('proto', 'TCP')} ({svc})"
+                                    f"  Port:     {p_host}:{p_ext} "
+                                    f"→ {p_port}/{p.get('proto', 'TCP')} ({svc})"
                                 )
 
                     services = lease_status.get("services") or {}
+                    if not isinstance(services, dict):
+                        services = {}
                     for svc, info in services.items():
+                        if not isinstance(info, dict):
+                            continue
                         ready = info.get("ready_replicas", 0)
                         total = info.get("total", 0)
                         print(f"  Service:  {svc} ({ready}/{total} ready)")
 
-                escrow = deployment.get("escrow_account", {}).get("state", {})
-                funds = escrow.get("funds", [])
-                for f in funds:
-                    print(f"  Escrow:   {f.get('amount', '?')} {f.get('denom', '?')}")
+                escrow_account = deployment.get("escrow_account") or {}
+                if isinstance(escrow_account, dict):
+                    escrow = escrow_account.get("state") or {}
+                    if isinstance(escrow, dict):
+                        funds = escrow.get("funds") or []
+                        if not isinstance(funds, list):
+                            funds = []
+                        for f in funds:
+                            if not isinstance(f, dict):
+                                continue
+                            print(f"  Escrow:   {f.get('amount', '?')} {f.get('denom', '?')}")
 
         elif args.command == "connect":
             dseq = _resolve_dseq(args.dseq)
@@ -522,12 +678,14 @@ def api_main():
                     sys.exit(1)
                 if len(deployments) == 1:
                     dseq = _extract_dseq(deployments[0])
-                    assert dseq
+                    if not dseq:
+                        raise RuntimeError("Could not extract dseq from deployment")
                     print(f"Auto-selected deployment {dseq}")
                 else:
                     dseq = _interactive_pick(deployments, client)
 
-            assert dseq
+            if not dseq:
+                raise RuntimeError("No deployment selected")
             deployment = client.get_deployment(dseq)
             ssh = _extract_ssh_info(deployment)
             if not ssh:
@@ -576,12 +734,14 @@ def api_main():
                     sys.exit(0)
                 if len(deployments) == 1:
                     dseq = _extract_dseq(deployments[0])
-                    assert dseq
+                    if not dseq:
+                        raise RuntimeError("Could not extract dseq from deployment")
                     print(f"Auto-selected deployment {dseq}")
                 else:
                     dseq = _interactive_pick(deployments, client)
 
-            assert dseq
+            if not dseq:
+                raise RuntimeError("No deployment selected")
             tag = _get_tag(dseq)
             label = f"{dseq} ({tag})" if tag else dseq
             if _confirm(f"Close deployment {label}? (y/N) ", yes=args.yes):
