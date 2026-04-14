@@ -4,6 +4,14 @@ Justfile recipes + Python CLI for deploying on [Akash Network](https://akash.net
 
 Self-contained — clone, configure `.env`, and run.
 
+## ✨ What's New in v1.3.0
+
+- **200 adversarial tests** ensuring robustness against edge cases
+- **Enhanced security** with comprehensive input validation
+- **Unicode support** for international characters and tags
+- **Improved error handling** for network issues and malformed data
+- **59% test coverage** with extensive edge case testing
+
 ## Prerequisites
 
 - Python 3.10+
@@ -27,16 +35,64 @@ uv run pre-commit install   # install gitleaks + ruff hooks
 
 | Command | Usage | Purpose |
 |---------|-------|---------|
-| `just up [tag]` | `just up my-backtest` | Deploy SSH-enabled instance (polls bids, picks cheapest) |
-| `just connect [dseq]` | `just connect 12345` | SSH into a running instance |
-| `just down [dseq]` | `just down 12345` | Stop an instance |
+| `just up [tag]` | `just up my-web-app` | Deploy SSH-enabled instance (polls bids, picks cheapest) |
+| `just connect [dseq|tag]` | `just connect 12345`<br>`just connect my-web-app` | SSH into a running instance |
+| `just down [dseq|tag]` | `just down 12345`<br>`just down my-web-app` | Stop an instance |
 | `just down-all` | `just down-all` | Stop all instances |
-| `just tag DSEQ NAME` | `just tag 12345 my-job` | Tag a deployment with a name |
+| `just tag DSEQ NAME` | `just tag 12345 my-database` | Tag a deployment with a name |
 | `just ls` | `just ls` | List active instances |
-| `just status [dseq]` | `just status 12345` | Show instance details |
+| `just status [dseq|tag]` | `just status 12345`<br>`just status my-database` | Show instance details |
 | `just test` | `just test` | Full lifecycle test (up → verify → SSH → down → cleanup) |
 | `just lint` | `just lint` | Ruff lint + format check |
 | `just secrets` | `just secrets` | Gitleaks secret scan |
+
+### DSEQs vs Tags
+
+**DSEQ** (Deployment Sequence) is the unique numeric ID assigned by Akash when you create a deployment.
+
+**Tags** are human-readable names you can assign to DSEQs for easier management.
+
+```bash
+# Deploy and get a DSEQ (e.g., 12345)
+just up my-web-app
+# Output: Created deployment with DSEQ: 12345
+
+# Tag it for easy reference
+just tag 12345 my-web-app
+
+# Now you can use either:
+just status 12345       # Using DSEQ
+just status my-web-app  # Using tag
+
+just connect my-web-app # Connect using tag
+just down my-web-app    # Stop using tag
+```
+
+### Quick Start Examples
+
+#### Deploy your first instance:
+```bash
+just up hello-world
+```
+This creates an SSH-enabled Ubuntu instance, waits for bids, picks the cheapest provider, and tags it as "hello-world".
+
+#### Connect and work:
+```bash
+just connect hello-world
+# SSH into your instance
+```
+
+#### Check status:
+```bash
+just ls                    # List all deployments
+just status hello-world    # Detailed status
+```
+
+#### Clean up:
+```bash
+just down hello-world      # Stop this instance
+just down-all             # Stop everything
+```
 
 ### With `uv run` (direct CLI)
 
