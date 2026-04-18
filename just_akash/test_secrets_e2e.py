@@ -1,0 +1,319 @@
+#!/usr/bin/env python3
+"""
+E2E test: inject secrets via SSH, verify via SSH.
+
+Flow:
+  1. Validate environment (API key, providers, SSH key)
+  2. Deploy SSH instance
+  3. Wait for SSH readiness
+  4. Inject secrets via SSH
+  5. Verify secrets exist via SSH
+  6. Cleanup
+
+Requires: AKASH_API_KEY, AKASH_PROVIDERS, SSH_PUBKEY.
+
+Usage:
+    just test-secrets
+"""
+
+import os
+import re
+import subprocess
+import sys
+import tempfile
+import time
+
+GREEN = "\033[92m"
+RED = "\033[91m"
+YELLOW = "\033[93m"
+BOLD = "\033[1m"
+RESET = "\033[0m"
+
+TOTAL_STEPS = 6
+
+
+def log_step(n, msg):
+    print(f"\n{BOLD}[{n}/{TOTAL_STEPS}]{RESET} {msg}")
+
+
+def log_pass(msg):
+    print(f"  {GREEN}PASS{RESET} {msg}")
+
+
+def log_fail(msg):
+    print(f"  {RED}FAIL{RESET} {msg}")
+
+
+def log_info(msg):
+    print(f"  {YELLOW}INFO{RESET} {msg}")
+
+
+def run(cmd: str, timeout: int = 60, input_text: str | None = None) -> subprocess.CompletedProcess:
+    return subprocess.run(
+        cmd,
+        shell=True,
+        capture_output=True,
+        text=True,
+        timeout=timeout,
+        input=input_text,
+    )
+
+
+def _wait_for_ssh(ssh_key, ssh_host, ssh_port, max_attempts=18):
+    for attempt in range(1, max_attempts + 1):
+        try:
+            result = subprocess.run(
+                [
+                    "ssh",
+                    "-o",
+                    "StrictHostKeyChecking=no",
+                    "-o",
+                    "UserKnownHostsFile=/dev/null",
+                    "-o",
+                    "ConnectTimeout=10",
+                    "-o",
+                    "BatchMode=yes",
+                    "-i",
+                    ssh_key,
+                    "-p",
+                    ssh_port,
+                    f"root@{ssh_host}",
+                    "echo akash-ssh-ok",
+                ],
+                capture_output=True,
+                text=True,
+                timeout=15,
+            )
+            if "akash-ssh-ok" in result.stdout:
+                return True
+        except (subprocess.TimeoutExpired, OSError):
+            pass
+        print(
+            f"\r  SSH attempt {attempt}/{max_attempts} — waiting for sshd...", end="", flush=True
+        )
+        time.sleep(10)
+    print()
+    return False
+
+
+def main():
+    failures = []
+    dseq = None
+
+    print(f"\n{BOLD}{'=' * 60}{RESET}")
+    print(f"{BOLD}  Akash Secrets Injection E2E Test{RESET}")
+    print(f"{BOLD}  (SSH inject → SSH verify){RESET}")
+    print(f"{BOLD}{'=' * 60}{RESET}")
+
+    # ── Step 1: Validate environment ───────────────────
+    log_step(1, "Validate environment")
+
+    for var in ("AKASH_API_KEY", "AKASH_PROVIDERS", "SSH_PUBKEY"):
+        if os.environ.get(var):
+            log_pass(f"{var} is set")
+        else:
+            log_fail(f"{var} not set")
+            sys.exit(1)
+
+    ssh_key = None
+    for candidate in [
+        os.path.expanduser(f"~/.ssh/id_ed25519_akash_node{i}") for i in range(1, 4)
+    ] + [os.path.expanduser("~/.ssh/id_ed25519")]:
+        if os.path.exists(candidate):
+            ssh_key = candidate
+            break
+    if not ssh_key:
+        log_fail("No SSH private key found")
+        sys.exit(1)
+    log_pass(f"SSH key: {ssh_key}")
+
+    # ── Step 2: Deploy SSH instance ────────────────────
+    log_step(2, "Deploy SSH instance")
+
+    r = run("just up", timeout=300)
+    output = r.stdout + r.stderr
+    print(output)
+
+    if r.returncode != 0:
+        log_fail("just up failed")
+        m = re.search(r"DSEQ[:\s]+(\d+)", output)
+        if m:
+            _cleanup(m.group(1))
+        _summary(["deploy: failed"])
+        sys.exit(1)
+
+    m = re.search(r"DSEQ[:\s]+(\d+)", output)
+    if not m:
+        log_fail("Could not parse DSEQ from output")
+        _summary(["deploy: no dseq"])
+        sys.exit(1)
+
+    dseq = m.group(1)
+    log_pass(f"Deployed: DSEQ={dseq}")
+
+    # ── Step 3: Wait for SSH readiness ─────────────────
+    log_step(3, f"Wait for SSH on DSEQ {dseq}")
+
+    log_info("Waiting 10s for lease propagation...")
+    time.sleep(10)
+
+    import json as _json
+
+    ssh_host = None
+    ssh_port = None
+    for _attempt in range(3):
+        r = run(f"uv run just-akash status --dseq {dseq} --json")
+        try:
+            status_data = _json.loads(r.stdout)
+            ssh_host = status_data.get("ssh_host")
+            ssh_port = str(status_data.get("ssh_port", ""))
+            if ssh_host and ssh_port:
+                break
+        except _json.JSONDecodeError:
+            pass
+        log_info(f"Status attempt {_attempt + 1}/3 — waiting for SSH info...")
+        time.sleep(5)
+
+    if not ssh_host or not ssh_port:
+        log_fail("Could not extract SSH endpoint from status")
+        _cleanup(dseq)
+        _summary(["ssh: no endpoint"])
+        sys.exit(1)
+    log_info(f"SSH endpoint: {ssh_host}:{ssh_port}")
+
+    if _wait_for_ssh(ssh_key, ssh_host, ssh_port):
+        log_pass("SSH is ready")
+    else:
+        log_fail("SSH failed to become ready")
+        failures.append("ssh: not ready")
+        _cleanup(dseq)
+        _summary(failures)
+        sys.exit(1)
+
+    # ── Step 4: Inject secrets via SSH ───────────────────
+    log_step(4, "Inject secrets via SSH")
+
+    test_secret_key = "E2E_TEST_SECRET"
+    test_secret_value = "akash-secrets-e2e-ok-1234"
+
+    fd, env_file = tempfile.mkstemp(suffix=".env", prefix="akash-test-secrets-")
+    try:
+        with os.fdopen(fd, "w") as f:
+            f.write("# test secrets\n")
+            f.write(f"{test_secret_key}={test_secret_value}\n")
+            f.write("ANOTHER_VAR=hello_world\n")
+
+        inject_cmd = f"uv run just-akash inject --dseq {dseq} --env-file {env_file}"
+        log_info(f"Running: {inject_cmd}")
+        r = run(inject_cmd, timeout=60)
+        print(r.stdout)
+        if r.stderr:
+            print(r.stderr)
+
+        if r.returncode != 0:
+            log_fail(f"Inject failed (exit {r.returncode}): {r.stderr.strip()}")
+            failures.append("inject: failed")
+        elif "Injected" in r.stdout:
+            log_pass("Secrets injected via SSH")
+        else:
+            log_fail(f"Unexpected inject output: {r.stdout.strip()}")
+            failures.append("inject: unexpected output")
+    finally:
+        os.unlink(env_file)
+
+    # ── Step 5: Verify secrets via SSH ─────────────────
+    log_step(5, "Verify secrets via SSH")
+
+    if "inject" not in [f.split(":")[0] for f in failures]:
+        verify_cmd = [
+            "ssh",
+            "-o",
+            "StrictHostKeyChecking=no",
+            "-o",
+            "UserKnownHostsFile=/dev/null",
+            "-o",
+            "BatchMode=yes",
+            "-i",
+            ssh_key,
+            "-p",
+            ssh_port,
+            f"root@{ssh_host}",
+            "cat /run/secrets/.env",
+        ]
+        try:
+            result = subprocess.run(verify_cmd, capture_output=True, text=True, timeout=15)
+            secrets_content = result.stdout
+
+            if result.returncode != 0:
+                log_fail(f"SSH cat failed: {result.stderr.strip()}")
+                failures.append("verify: ssh cat failed")
+            elif test_secret_value in secrets_content:
+                log_pass(f"Found {test_secret_key}={test_secret_value} in /run/secrets/.env")
+
+                if "ANOTHER_VAR=hello_world" in secrets_content:
+                    log_pass("Found ANOTHER_VAR=hello_world")
+                else:
+                    log_fail("ANOTHER_VAR not found")
+                    failures.append("verify: missing ANOTHER_VAR")
+
+                verify_perms = [
+                    "ssh",
+                    "-o",
+                    "StrictHostKeyChecking=no",
+                    "-o",
+                    "UserKnownHostsFile=/dev/null",
+                    "-o",
+                    "BatchMode=yes",
+                    "-i",
+                    ssh_key,
+                    "-p",
+                    ssh_port,
+                    f"root@{ssh_host}",
+                    "stat -c '%a' /run/secrets/.env",
+                ]
+                perm_result = subprocess.run(
+                    verify_perms, capture_output=True, text=True, timeout=15
+                )
+                perms = perm_result.stdout.strip()
+                if perms == "600":
+                    log_pass("File permissions are 600")
+                else:
+                    log_info(f"File permissions: {perms} (expected 600)")
+            else:
+                log_fail("Secret value not found in /run/secrets/.env")
+                log_info(f"Content: {secrets_content[:200]}")
+                failures.append("verify: secret value missing")
+        except subprocess.TimeoutExpired:
+            log_fail("SSH verification timed out")
+            failures.append("verify: timeout")
+    else:
+        log_info("Skipping verification (inject failed)")
+
+    # ── Step 6: Cleanup ────────────────────────────────
+    log_step(6, f"Cleanup DSEQ {dseq}")
+    _cleanup(dseq)
+    log_pass("Deployment destroyed")
+
+    _summary(failures)
+    sys.exit(1 if failures else 0)
+
+
+def _cleanup(dseq: str):
+    log_info(f"Destroying {dseq}...")
+    run(f"just destroy {dseq}", input_text="y\n", timeout=30)
+
+
+def _summary(failures: list):
+    passed = TOTAL_STEPS - len(failures)
+    print(f"\n{BOLD}{'=' * 60}{RESET}")
+    if failures:
+        print(f"{RED}{BOLD}  FAILED{RESET} — {passed}/{TOTAL_STEPS} steps passed")
+        for f in failures:
+            print(f"  {RED}x{RESET} {f}")
+    else:
+        print(f"{GREEN}{BOLD}  ALL PASSED{RESET} — {TOTAL_STEPS}/{TOTAL_STEPS} steps")
+    print(f"{BOLD}{'=' * 60}{RESET}\n")
+
+
+if __name__ == "__main__":
+    main()

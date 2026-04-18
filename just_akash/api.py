@@ -85,8 +85,10 @@ def _json_output(data: dict[str, Any] | list[Any]) -> str:
 class AkashConsoleAPI:
     """Client for Akash Console API (https://console-api.akash.network)"""
 
-    def __init__(self, api_key: str):
-        self.base_url = "https://console-api.akash.network"
+    def __init__(self, api_key: str, base_url: str | None = None):
+        self.base_url = base_url or os.environ.get(
+            "AKASH_CONSOLE_URL", "https://console-api.akash.network"
+        )
         self.api_key = api_key
         self.headers = {
             "x-api-key": api_key,
@@ -331,6 +333,35 @@ def _extract_bid_price(bid: dict[str, Any]) -> tuple:
         return (float(price) if price else float("inf"), "uakt")
     except (TypeError, ValueError):
         return (float("inf"), "uakt")
+
+
+def _find_ssh_key(explicit_key: str = "") -> str | None:
+    if explicit_key:
+        return explicit_key if os.path.exists(explicit_key) else None
+    for candidate in [
+        os.path.expanduser(f"~/.ssh/id_ed25519_akash_node{i}") for i in range(1, 4)
+    ] + [
+        os.path.expanduser("~/.ssh/id_ed25519"),
+        os.path.expanduser("~/.ssh/id_rsa"),
+    ]:
+        if os.path.exists(candidate):
+            return candidate
+    return None
+
+
+def _build_ssh_cmd(ssh_info: dict[str, Any], key_path: str) -> list[str]:
+    return [
+        "ssh",
+        "-o",
+        "StrictHostKeyChecking=no",
+        "-o",
+        "UserKnownHostsFile=/dev/null",
+        "-i",
+        key_path,
+        "-p",
+        str(ssh_info["port"]),
+        f"root@{ssh_info['host']}",
+    ]
 
 
 def _extract_ssh_info(deployment: dict[str, Any]) -> dict[str, Any] | None:
@@ -693,37 +724,14 @@ def api_main():
                 print("Deploy with SSH SDL: just up")
                 sys.exit(1)
 
-            key_path = args.key
-            if not key_path:
-                for candidate in [
-                    os.path.expanduser("~/.ssh/id_ed25519_akash_node1"),
-                    os.path.expanduser("~/.ssh/id_ed25519_akash_node2"),
-                    os.path.expanduser("~/.ssh/id_ed25519_akash_node3"),
-                    os.path.expanduser("~/.ssh/id_ed25519"),
-                    os.path.expanduser("~/.ssh/id_rsa"),
-                ]:
-                    if os.path.exists(candidate):
-                        key_path = candidate
-                        break
-
+            key_path = _find_ssh_key(args.key)
             if not key_path:
                 print("No SSH key found. Specify with --key")
                 sys.exit(1)
 
-            cmd = [
-                "ssh",
-                "-o",
-                "StrictHostKeyChecking=no",
-                "-o",
-                "UserKnownHostsFile=/dev/null",
-                "-i",
-                key_path,
-                "-p",
-                str(ssh["port"]),
-                f"root@{ssh['host']}",
-            ]
+            ssh_cmd = _build_ssh_cmd(ssh, key_path)
             print(f"Connecting to {ssh['host']}:{ssh['port']}...")
-            os.execvp("ssh", cmd)
+            os.execvp("ssh", ssh_cmd)
 
         elif args.command == "close":
             dseq = _resolve_dseq(args.dseq)

@@ -1940,10 +1940,12 @@ class TestBidPollingZeroTimeout:
         )
         monkeypatch.setattr(client, "get_bids", lambda _: [])
 
-        with patch("just_akash.deploy.AkashConsoleAPI", return_value=client):
-            with pytest.raises(RuntimeError, match="No bids received"):
-                # Should not hang indefinitely
-                deploy(sdl_path=str(sdl_file), bid_wait=0, bid_wait_retry=0)
+        with (
+            patch("just_akash.deploy.AkashConsoleAPI", return_value=client),
+            pytest.raises(RuntimeError, match="No bids received"),
+        ):
+            # Should not hang indefinitely
+            deploy(sdl_path=str(sdl_file), bid_wait=0, bid_wait_retry=0)
 
 
 class TestImageOverrideNoImagesInSdl:
@@ -2710,11 +2712,9 @@ class TestRaceConditionFileOperations:
         def continuous_write():
             counter = 0
             while not stop_flag[0]:
-                try:
+                with contextlib.suppress(Exception):
                     api._save_tags({f"dseq{counter}": f"tag{counter}"})
                     counter += 1
-                except:
-                    pass
                 time.sleep(0.001)
 
         # Start concurrent read/write operations
@@ -2819,10 +2819,12 @@ class TestRequestHttpErrorListJsonBody:
             fp=io.BytesIO(b'["validation error", "field missing"]'),
         )
 
-        with patch.object(urllib.request, "urlopen", side_effect=err):
+        with (
+            patch.object(urllib.request, "urlopen", side_effect=err),
+            pytest.raises(RuntimeError, match="API Error"),
+        ):
             # Should raise RuntimeError with a clean message, NOT AttributeError
-            with pytest.raises(RuntimeError, match="API Error"):
-                client._request("GET", "/v1/test")
+            client._request("GET", "/v1/test")
 
     def test_http_error_with_string_body(self, monkeypatch):
         """Non-JSON body should also work (falls back to raw string)."""
@@ -2840,9 +2842,11 @@ class TestRequestHttpErrorListJsonBody:
             fp=io.BytesIO(b"Internal server error"),
         )
 
-        with patch.object(urllib.request, "urlopen", side_effect=err):
-            with pytest.raises(RuntimeError, match="API Error"):
-                client._request("GET", "/v1/test")
+        with (
+            patch.object(urllib.request, "urlopen", side_effect=err),
+            pytest.raises(RuntimeError, match="API Error"),
+        ):
+            client._request("GET", "/v1/test")
 
 
 class TestGetProviderProvidersKeyIsNone:
@@ -2890,7 +2894,7 @@ class TestCliMainStatusDeploymentFieldNone:
 
         from just_akash.cli import main
 
-        with patch.object(sys, "argv", ["just-akash", "api", "status", "--dseq", "123"]):
+        with patch.object(sys, "argv", ["just-akash", "status", "--dseq", "123"]):
             # Must complete or exit cleanly, not crash with AttributeError
             try:
                 main()
@@ -2908,7 +2912,7 @@ class TestCliMainStatusDeploymentFieldNone:
 
         from just_akash.cli import main
 
-        with patch.object(sys, "argv", ["just-akash", "api", "status", "--dseq", "123"]):
+        with patch.object(sys, "argv", ["just-akash", "status", "--dseq", "123"]):
             try:
                 main()
             except SystemExit as e:
@@ -3021,7 +3025,7 @@ class TestE2eCliWithMalformedInputs:
         """Test CLI with extremely long dseq that could cause formatting issues."""
         monkeypatch.setenv("AKASH_API_KEY", "test-key")
         long_dseq = "1" * 10000  # 10k character dseq
-        monkeypatch.setattr(sys, "argv", ["just-akash", "api", "status", "--dseq", long_dseq])
+        monkeypatch.setattr(sys, "argv", ["just-akash", "status", "--dseq", long_dseq])
 
         from just_akash.cli import main
 
@@ -3040,7 +3044,7 @@ class TestE2eCliWithMalformedInputs:
         """Test CLI with Unicode characters in dseq."""
         monkeypatch.setenv("AKASH_API_KEY", "test-key")
         unicode_dseq = "dseq🚀123"
-        monkeypatch.setattr(sys, "argv", ["just-akash", "api", "status", "--dseq", unicode_dseq])
+        monkeypatch.setattr(sys, "argv", ["just-akash", "status", "--dseq", unicode_dseq])
 
         from just_akash.cli import main
 
@@ -3058,7 +3062,7 @@ class TestE2eCliWithMalformedInputs:
         """Test CLI with null bytes in dseq - could cause C extension issues."""
         monkeypatch.setenv("AKASH_API_KEY", "test-key")
         malicious_dseq = "123\x00evil"
-        monkeypatch.setattr(sys, "argv", ["just-akash", "api", "status", "--dseq", malicious_dseq])
+        monkeypatch.setattr(sys, "argv", ["just-akash", "status", "--dseq", malicious_dseq])
 
         from just_akash.cli import main
 
@@ -3076,7 +3080,7 @@ class TestE2eCliWithMalformedInputs:
         monkeypatch.setenv("AKASH_API_KEY", "test-key")
         long_tag = "a" * 100000  # 100k character tag
         monkeypatch.setattr(
-            sys, "argv", ["just-akash", "api", "tag", "--dseq", "12345", "--name", long_tag]
+            sys, "argv", ["just-akash", "tag", "--dseq", "12345", "--name", long_tag]
         )
 
         from just_akash.cli import main
@@ -3191,10 +3195,9 @@ services:
 """
         sdl_file.write_text(sdl_content)
 
-        with patch("just_akash.deploy.AkashConsoleAPI"):
+        with patch("just_akash.deploy.AkashConsoleAPI"), pytest.raises((RuntimeError, Exception)):
             # Should fail during SDL processing
-            with pytest.raises((RuntimeError, Exception)):
-                deploy(sdl_path=str(sdl_file), bid_wait=0, bid_wait_retry=0)
+            deploy(sdl_path=str(sdl_file), bid_wait=0, bid_wait_retry=0)
 
 
 class TestE2eNetworkEdgeCases:
@@ -3299,7 +3302,7 @@ class TestE2eLargeScaleDataHandling:
     def test_list_deployments_with_thousands_of_results(self, monkeypatch, capsys):
         """Test listing thousands of deployments."""
         monkeypatch.setenv("AKASH_API_KEY", "test-key")
-        monkeypatch.setattr(sys, "argv", ["just-akash", "api", "list"])
+        monkeypatch.setattr(sys, "argv", ["just-akash", "list"])
 
         from just_akash.cli import main
 
@@ -3323,7 +3326,7 @@ class TestE2eLargeScaleDataHandling:
     def test_status_with_massive_deployment_response(self, monkeypatch, capsys):
         """Test status with extremely large deployment response."""
         monkeypatch.setenv("AKASH_API_KEY", "test-key")
-        monkeypatch.setattr(sys, "argv", ["just-akash", "api", "status", "--dseq", "12345"])
+        monkeypatch.setattr(sys, "argv", ["just-akash", "status", "--dseq", "12345"])
 
         from just_akash.cli import main
 

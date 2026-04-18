@@ -62,12 +62,35 @@ def _log_bid_table(bids: list, label: str):
         )
 
 
+def _inject_env_into_sdl(sdl_content: str, env_vars: list[str]) -> str:
+    if not env_vars:
+        return sdl_content
+    env_match = re.search(r"^(\s+)env:\s*\n", sdl_content, re.MULTILINE)
+    if env_match:
+        indent = env_match.group(1)
+        entry_indent = indent + "  "
+        insert_pos = env_match.end()
+        new_entries = "".join(f"{entry_indent}- {var}\n" for var in env_vars)
+        return sdl_content[:insert_pos] + new_entries + sdl_content[insert_pos:]
+    expose_match = re.search(r"^(\s+)expose:\s*\n", sdl_content, re.MULTILINE)
+    if expose_match:
+        indent = expose_match.group(1)
+        new_block = f"{indent}env:\n"
+        for var in env_vars:
+            new_block += f"{indent}  - {var}\n"
+        return (
+            sdl_content[: expose_match.start()] + new_block + sdl_content[expose_match.start() :]
+        )
+    return sdl_content
+
+
 def deploy(
     sdl_path: str,
     gpu: bool = False,
     image: str | None = None,
     bid_wait: int = 60,
     bid_wait_retry: int = 120,
+    env_vars: list[str] | None = None,
 ) -> dict:
     api_key = os.environ.get("AKASH_API_KEY")
     if not api_key:
@@ -122,6 +145,10 @@ def deploy(
         encoded = base64.b64encode(ssh_pubkey.encode()).decode()
         sdl_content = sdl_content.replace("PLACEHOLDER_SSH_PUBKEY_B64", encoded)
         _log(logging.INFO, "Injected SSH public key (base64) into SDL")
+
+    if env_vars:
+        sdl_content = _inject_env_into_sdl(sdl_content, env_vars)
+        _log(logging.INFO, f"Injected {len(env_vars)} env var(s) into SDL (provider-visible)")
 
     # Step 2: Create deployment
     _log(logging.INFO, "STEP 2: Creating deployment via Console API...")
@@ -436,6 +463,13 @@ def deploy_main():
         default=120,
         help="Seconds to wait for bids if none received after first phase (default: 120)",
     )
+    parser.add_argument(
+        "--env",
+        action="append",
+        dest="env_vars",
+        default=[],
+        help="KEY=VALUE env var to inject into SDL (repeatable, provider-visible)",
+    )
 
     args = parser.parse_args()
 
@@ -451,6 +485,7 @@ def deploy_main():
             image=args.image,
             bid_wait=args.bid_wait,
             bid_wait_retry=args.bid_wait_retry,
+            env_vars=args.env_vars,
         )
         sys.exit(0)
     except RuntimeError as e:

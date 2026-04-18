@@ -274,10 +274,13 @@ class TestApiMain:
         captured = capsys.readouterr()
         assert "No SSH key found" in captured.out
 
+    @patch("just_akash.api._find_ssh_key", return_value="/fake/key")
     @patch("just_akash.api._extract_ssh_info", return_value={"host": "1.2.3.4", "port": 22})
     @patch("just_akash.api._extract_lease_provider", return_value=None)
     @patch("just_akash.api.AkashConsoleAPI")
-    def test_connect_with_key_found(self, MockAPI, mock_lease, mock_ssh, monkeypatch):
+    def test_connect_with_key_found(
+        self, MockAPI, mock_lease, mock_ssh, mock_find_key, monkeypatch
+    ):
         monkeypatch.setenv("AKASH_API_KEY", "test-key")
         monkeypatch.setattr(
             sys, "argv", ["api", "connect", "--dseq", "12345", "--key", "/fake/key"]

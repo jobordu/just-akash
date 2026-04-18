@@ -3,7 +3,7 @@
 End-to-end lifecycle test for Akash deployments.
 
 Tests the real user workflow by calling `just` targets:
-  just up → just ls → just status → just connect (SSH verify) → just down → just ls
+  just up → just list → just status → just connect (SSH verify) → just destroy → just list
 
 Requires AKASH_API_KEY, AKASH_PROVIDERS, and SSH_PUBKEY in environment.
 
@@ -87,11 +87,11 @@ def main():
         sys.exit(1)
     log_pass(f"SSH key: {ssh_key}")
 
-    log_step(2, "just ls — check initial state")
+    log_step(2, "just list — check initial state")
 
-    r = run("just ls")
+    r = run("just list")
     if r.returncode != 0:
-        log_fail(f"just ls failed: {r.stderr.strip()}")
+        log_fail(f"just list failed: {r.stderr.strip()}")
         sys.exit(1)
     log_pass("API reachable")
     log_info(r.stdout.strip())
@@ -210,14 +210,14 @@ def main():
             log_fail("SSH connection FAILED after 18 attempts")
             failures.append(f"connect: SSH failed to {ssh_host}:{ssh_port}")
 
-    log_step(6, f"just down {dseq} — stop instance")
+    log_step(6, f"just destroy {dseq} — stop instance")
 
-    r = run(f"just down {dseq}", input_text="y\n")
+    r = run(f"just destroy {dseq}", input_text="y\n")
     output = r.stdout + r.stderr
     print(output.strip())
 
     if r.returncode != 0:
-        log_fail(f"just down failed: {r.stderr.strip()}")
+        log_fail(f"just destroy failed: {r.stderr.strip()}")
         failures.append("down: failed")
     elif "closed" in output.lower():
         log_pass(f"Deployment {dseq} closed")
@@ -225,10 +225,10 @@ def main():
         log_fail("Unexpected down output")
         failures.append("down: unexpected output")
 
-    log_step(7, "just ls — verify instance is gone")
+    log_step(7, "just list — verify instance is gone")
 
     time.sleep(3)
-    r = run("just ls")
+    r = run("just list")
     ls_output = r.stdout
 
     if dseq not in ls_output:
@@ -243,7 +243,7 @@ def main():
 
 def _cleanup(dseq: str):
     log_info(f"Cleaning up {dseq}...")
-    run(f"just down {dseq}", input_text="y\n", timeout=30)
+    run(f"just destroy {dseq}", input_text="y\n", timeout=30)
 
 
 def _summary(failures: list):

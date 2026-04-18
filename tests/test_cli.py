@@ -36,48 +36,39 @@ class TestCliDeploy:
         assert exc_info.value.code == 1
 
 
-class TestCliApiNoApiKey:
-    def test_api_no_key(self, monkeypatch, capsys):
+class TestCliListNoApiKey:
+    def test_list_no_key(self, monkeypatch, capsys):
         monkeypatch.delenv("AKASH_API_KEY", raising=False)
         with pytest.raises(SystemExit) as exc_info:
-            _run_cli(monkeypatch, ["just-akash", "api", "list"])
+            _run_cli(monkeypatch, ["just-akash", "list"])
         assert exc_info.value.code == 1
         captured = capsys.readouterr()
         assert "AKASH_API_KEY not set" in captured.err
 
 
-class TestCliApiNoSubcommand:
-    @patch("just_akash.api.AkashConsoleAPI")
-    def test_api_no_subcommand(self, MockAPI, monkeypatch, capsys):
-        monkeypatch.setenv("AKASH_API_KEY", "test-key")
-        with pytest.raises(SystemExit) as exc_info:
-            _run_cli(monkeypatch, ["just-akash", "api"])
-        assert exc_info.value.code == 0
-
-
-class TestCliApiList:
+class TestCliList:
     @patch("just_akash.api.format_deployments_table", return_value="table output")
     @patch("just_akash.api.AkashConsoleAPI")
-    def test_api_list_tty(self, MockAPI, mock_fmt, monkeypatch, capsys):
+    def test_list_tty(self, MockAPI, mock_fmt, monkeypatch, capsys):
         monkeypatch.setenv("AKASH_API_KEY", "test-key")
         client = MockAPI.return_value
         client.list_deployments.return_value = []
         monkeypatch.setattr(sys.stdout, "isatty", lambda: True)
-        _run_cli(monkeypatch, ["just-akash", "api", "list"])
+        _run_cli(monkeypatch, ["just-akash", "list"])
         captured = capsys.readouterr()
         assert "table output" in captured.out
 
     @patch("just_akash.api.AkashConsoleAPI")
-    def test_api_list_json(self, MockAPI, monkeypatch, capsys):
+    def test_list_json(self, MockAPI, monkeypatch, capsys):
         monkeypatch.setenv("AKASH_API_KEY", "test-key")
         client = MockAPI.return_value
         client.list_deployments.return_value = []
-        _run_cli(monkeypatch, ["just-akash", "api", "list"])
+        _run_cli(monkeypatch, ["just-akash", "list"])
         captured = capsys.readouterr()
         assert "[]" in captured.out
 
 
-class TestCliApiStatusWithDseq:
+class TestCliStatusWithDseq:
     @patch("just_akash.api._extract_ssh_info", return_value=None)
     @patch("just_akash.api._extract_lease_provider", return_value="akash1prov")
     @patch("just_akash.api._get_tag", return_value="my-job")
@@ -91,78 +82,75 @@ class TestCliApiStatusWithDseq:
             "deployment": {"state": "active"},
             "leases": [],
         }
-        _run_cli(monkeypatch, ["just-akash", "api", "status", "--dseq", "12345"])
+        _run_cli(monkeypatch, ["just-akash", "status", "--dseq", "12345"])
         captured = capsys.readouterr()
         assert "active" in captured.out
 
 
-class TestCliApiStatusNoDeployments:
+class TestCliStatusNoDeployments:
     @patch("just_akash.api._resolve_dseq", return_value="")
     @patch("just_akash.api.AkashConsoleAPI")
     def test_status_no_deployments(self, MockAPI, mock_resolve, monkeypatch, capsys):
         monkeypatch.setenv("AKASH_API_KEY", "test-key")
         client = MockAPI.return_value
         client.list_deployments.return_value = []
-        monkeypatch.setattr(sys.stdout, "isatty", lambda: True)
         with pytest.raises(SystemExit) as exc_info:
-            _run_cli(monkeypatch, ["just-akash", "api", "status"])
-        assert exc_info.value.code == 0
+            _run_cli(monkeypatch, ["just-akash", "status"])
+        assert exc_info.value.code == 1
         captured = capsys.readouterr()
         assert "No active deployments" in captured.out
 
 
-class TestCliApiCloseNoDeployments:
+class TestCliDestroyNoDeployments:
     @patch("just_akash.api._resolve_dseq", return_value="")
     @patch("just_akash.api.AkashConsoleAPI")
-    def test_close_no_deployments(self, MockAPI, mock_resolve, monkeypatch, capsys):
+    def test_destroy_no_deployments(self, MockAPI, mock_resolve, monkeypatch, capsys):
         monkeypatch.setenv("AKASH_API_KEY", "test-key")
         client = MockAPI.return_value
         client.list_deployments.return_value = []
         with pytest.raises(SystemExit) as exc_info:
-            _run_cli(monkeypatch, ["just-akash", "api", "close"])
-        assert exc_info.value.code == 0
+            _run_cli(monkeypatch, ["just-akash", "destroy"])
+        assert exc_info.value.code == 1
         captured = capsys.readouterr()
         assert "No active deployments" in captured.out
 
 
-class TestCliApiCloseAllNoDeployments:
+class TestCliDestroyAllNoDeployments:
     @patch("just_akash.api.AkashConsoleAPI")
-    def test_close_all_no_deployments(self, MockAPI, monkeypatch, capsys):
+    def test_destroy_all_no_deployments(self, MockAPI, monkeypatch, capsys):
         monkeypatch.setenv("AKASH_API_KEY", "test-key")
         client = MockAPI.return_value
         client.list_deployments.return_value = []
-        _run_cli(monkeypatch, ["just-akash", "api", "close-all"])
+        _run_cli(monkeypatch, ["just-akash", "destroy-all"])
         captured = capsys.readouterr()
-        assert "No deployments to close" in captured.out
+        assert "No deployments to destroy" in captured.out
 
 
-class TestCliApiTag:
+class TestCliTag:
     @patch("just_akash.api._save_tags")
     @patch("just_akash.api._load_tags", return_value={})
-    @patch("just_akash.api.AkashConsoleAPI")
-    def test_tag_success(self, MockAPI, mock_load, mock_save, monkeypatch, capsys):
+    def test_tag_success(self, mock_load, mock_save, monkeypatch, capsys):
         monkeypatch.setenv("AKASH_API_KEY", "test-key")
-        _run_cli(monkeypatch, ["just-akash", "api", "tag", "--dseq", "12345", "--name", "my-job"])
+        _run_cli(monkeypatch, ["just-akash", "tag", "--dseq", "12345", "--name", "my-job"])
         captured = capsys.readouterr()
         assert "Tagged 12345" in captured.out
         mock_save.assert_called_once()
 
-    @patch("just_akash.api.AkashConsoleAPI")
-    def test_tag_missing_args(self, MockAPI, monkeypatch):
+    def test_tag_missing_args(self, monkeypatch):
         monkeypatch.setenv("AKASH_API_KEY", "test-key")
         with pytest.raises(SystemExit) as exc_info:
-            _run_cli(monkeypatch, ["just-akash", "api", "tag"])
-        assert exc_info.value.code == 1
+            _run_cli(monkeypatch, ["just-akash", "tag"])
+        assert exc_info.value.code == 2
 
 
-class TestCliApiRuntimeError:
+class TestCliRuntimeError:
     @patch("just_akash.api.AkashConsoleAPI")
-    def test_api_runtime_error(self, MockAPI, monkeypatch, capsys):
+    def test_list_runtime_error(self, MockAPI, monkeypatch, capsys):
         monkeypatch.setenv("AKASH_API_KEY", "test-key")
         client = MockAPI.return_value
         client.list_deployments.side_effect = RuntimeError("API error")
         with pytest.raises(SystemExit) as exc_info:
-            _run_cli(monkeypatch, ["just-akash", "api", "list"])
+            _run_cli(monkeypatch, ["just-akash", "list"])
         assert exc_info.value.code == 1
         captured = capsys.readouterr()
         assert "API error" in captured.err
@@ -175,7 +163,7 @@ class TestCliTest:
         mock_test_main.assert_called_once()
 
 
-class TestCliApiStatusWithSsh:
+class TestCliStatusWithSsh:
     @patch("just_akash.api._extract_ssh_info")
     @patch("just_akash.api._extract_lease_provider", return_value="akash1prov")
     @patch("just_akash.api._get_tag", return_value="")
@@ -190,62 +178,62 @@ class TestCliApiStatusWithSsh:
             "leases": [],
         }
         mock_ssh.return_value = {"host": "1.2.3.4", "port": 22222}
-        _run_cli(monkeypatch, ["just-akash", "api", "status", "--dseq", "12345"])
+        _run_cli(monkeypatch, ["just-akash", "status", "--dseq", "12345"])
         captured = capsys.readouterr()
         assert "ssh -p 22222" in captured.out
 
 
-class TestCliApiCloseWithConfirm:
+class TestCliDestroyWithConfirm:
     @patch("just_akash.api._save_tags")
     @patch("just_akash.api._load_tags", return_value={})
     @patch("just_akash.api._resolve_dseq", return_value="12345")
     @patch("just_akash.api._get_tag", return_value="")
     @patch("just_akash.api.AkashConsoleAPI")
-    def test_close_confirmed(
+    def test_destroy_confirmed(
         self, MockAPI, mock_tag, mock_resolve, mock_load, mock_save, monkeypatch, capsys
     ):
         monkeypatch.setenv("AKASH_API_KEY", "test-key")
         monkeypatch.setattr("builtins.input", lambda _: "y")
-        _run_cli(monkeypatch, ["just-akash", "api", "close", "--dseq", "12345"])
+        _run_cli(monkeypatch, ["just-akash", "destroy", "--dseq", "12345"])
         captured = capsys.readouterr()
-        assert "closed" in captured.out
+        assert "destroyed" in captured.out
 
     @patch("just_akash.api._resolve_dseq", return_value="12345")
     @patch("just_akash.api._get_tag", return_value="")
     @patch("just_akash.api.AkashConsoleAPI")
-    def test_close_cancelled(self, MockAPI, mock_tag, mock_resolve, monkeypatch, capsys):
+    def test_destroy_cancelled(self, MockAPI, mock_tag, mock_resolve, monkeypatch, capsys):
         monkeypatch.setenv("AKASH_API_KEY", "test-key")
         monkeypatch.setattr("builtins.input", lambda _: "n")
-        _run_cli(monkeypatch, ["just-akash", "api", "close", "--dseq", "12345"])
+        _run_cli(monkeypatch, ["just-akash", "destroy", "--dseq", "12345"])
         captured = capsys.readouterr()
         assert "Cancelled" in captured.out
 
 
-class TestCliApiCloseAllWithConfirm:
+class TestCliDestroyAllWithConfirm:
     @patch("just_akash.api._extract_dseq", side_effect=["1", "2"])
     @patch("just_akash.api._save_tags")
     @patch("just_akash.api._load_tags", return_value={"1": "a", "2": "b"})
     @patch("just_akash.api.format_deployments_table", return_value="table")
     @patch("just_akash.api.AkashConsoleAPI")
-    def test_close_all_confirmed(
+    def test_destroy_all_confirmed(
         self, MockAPI, mock_fmt, mock_load, mock_save, mock_dseq, monkeypatch, capsys
     ):
         monkeypatch.setenv("AKASH_API_KEY", "test-key")
         client = MockAPI.return_value
         client.list_deployments.return_value = [{"dseq": "1"}, {"dseq": "2"}]
         monkeypatch.setattr("builtins.input", lambda _: "y")
-        _run_cli(monkeypatch, ["just-akash", "api", "close-all"])
+        _run_cli(monkeypatch, ["just-akash", "destroy-all"])
         captured = capsys.readouterr()
-        assert "All deployments closed" in captured.out
+        assert "All deployments destroyed" in captured.out
 
     @patch("just_akash.api.format_deployments_table", return_value="table")
     @patch("just_akash.api.AkashConsoleAPI")
-    def test_close_all_cancelled(self, MockAPI, mock_fmt, monkeypatch, capsys):
+    def test_destroy_all_cancelled(self, MockAPI, mock_fmt, monkeypatch, capsys):
         monkeypatch.setenv("AKASH_API_KEY", "test-key")
         client = MockAPI.return_value
         client.list_deployments.return_value = [{"dseq": "1"}]
         monkeypatch.setattr("builtins.input", lambda _: "n")
-        _run_cli(monkeypatch, ["just-akash", "api", "close-all"])
+        _run_cli(monkeypatch, ["just-akash", "destroy-all"])
         captured = capsys.readouterr()
         assert "Cancelled" in captured.out
 
@@ -277,14 +265,15 @@ class TestCliDeployPassesArgs:
             image="ubuntu:22.04",
             bid_wait=30,
             bid_wait_retry=60,
+            env_vars=[],
         )
 
 
-class TestCliApiConnect:
+class TestCliConnect:
+    @patch("just_akash.api._find_ssh_key", return_value="/fake/key")
     @patch("just_akash.api._extract_ssh_info", return_value={"host": "1.2.3.4", "port": 22})
-    @patch("just_akash.api._extract_lease_provider", return_value=None)
     @patch("just_akash.api.AkashConsoleAPI")
-    def test_connect_with_key(self, MockAPI, mock_lease, mock_ssh, monkeypatch, capsys):
+    def test_connect_ssh(self, MockAPI, mock_ssh, mock_find_key, monkeypatch, capsys):
         monkeypatch.setenv("AKASH_API_KEY", "test-key")
         client = MockAPI.return_value
         client.get_deployment.return_value = {
@@ -294,28 +283,23 @@ class TestCliApiConnect:
         with patch("os.execvp") as mock_exec:
             _run_cli(
                 monkeypatch,
-                ["just-akash", "api", "connect", "--dseq", "12345", "--key", "/fake/key"],
+                ["just-akash", "connect", "--dseq", "12345"],
             )
             mock_exec.assert_called_once()
 
-    @patch("just_akash.api._extract_ssh_info", return_value=None)
-    @patch("just_akash.api._extract_lease_provider", return_value=None)
     @patch("just_akash.api._resolve_dseq", return_value="")
     @patch("just_akash.api.AkashConsoleAPI")
-    def test_connect_no_deployments(
-        self, MockAPI, mock_resolve, mock_lease, mock_ssh, monkeypatch, capsys
-    ):
+    def test_connect_no_deployments(self, MockAPI, mock_resolve, monkeypatch, capsys):
         monkeypatch.setenv("AKASH_API_KEY", "test-key")
         client = MockAPI.return_value
         client.list_deployments.return_value = []
         with pytest.raises(SystemExit) as exc_info:
-            _run_cli(monkeypatch, ["just-akash", "api", "connect"])
+            _run_cli(monkeypatch, ["just-akash", "connect"])
         assert exc_info.value.code == 1
 
     @patch("just_akash.api._extract_ssh_info", return_value=None)
-    @patch("just_akash.api._extract_lease_provider", return_value=None)
     @patch("just_akash.api.AkashConsoleAPI")
-    def test_connect_no_ssh(self, MockAPI, mock_lease, mock_ssh, monkeypatch, capsys):
+    def test_connect_no_ssh_shows_warning(self, MockAPI, mock_ssh, monkeypatch, capsys):
         monkeypatch.setenv("AKASH_API_KEY", "test-key")
         client = MockAPI.return_value
         client.get_deployment.return_value = {
@@ -323,13 +307,15 @@ class TestCliApiConnect:
             "leases": [],
         }
         with pytest.raises(SystemExit) as exc_info:
-            _run_cli(monkeypatch, ["just-akash", "api", "connect", "--dseq", "12345"])
+            _run_cli(monkeypatch, ["just-akash", "connect", "--dseq", "12345"])
         assert exc_info.value.code == 1
+        captured = capsys.readouterr()
+        assert "SSH-enabled SDL" in captured.err
+        assert "lease-shell" in captured.err
 
     @patch("just_akash.api._extract_ssh_info", return_value={"host": "1.2.3.4", "port": 22})
-    @patch("just_akash.api._extract_lease_provider", return_value=None)
     @patch("just_akash.api.AkashConsoleAPI")
-    def test_connect_no_key_found(self, MockAPI, mock_lease, mock_ssh, monkeypatch, capsys):
+    def test_connect_no_key_found(self, MockAPI, mock_ssh, monkeypatch, capsys):
         monkeypatch.setenv("AKASH_API_KEY", "test-key")
         client = MockAPI.return_value
         client.get_deployment.return_value = {
@@ -338,14 +324,44 @@ class TestCliApiConnect:
         }
         monkeypatch.setattr(os.path, "exists", lambda _: False)
         with pytest.raises(SystemExit) as exc_info:
-            _run_cli(monkeypatch, ["just-akash", "api", "connect", "--dseq", "12345"])
+            _run_cli(monkeypatch, ["just-akash", "connect", "--dseq", "12345"])
         assert exc_info.value.code == 1
 
 
-class TestCliApiUnknownCommand:
+class TestCliExecNoSsh:
+    @patch("just_akash.api._extract_ssh_info", return_value=None)
     @patch("just_akash.api.AkashConsoleAPI")
-    def test_unknown_api_command(self, MockAPI, monkeypatch, capsys):
+    def test_exec_no_ssh_shows_warning(self, MockAPI, mock_ssh, monkeypatch, capsys):
         monkeypatch.setenv("AKASH_API_KEY", "test-key")
-        _run_cli(monkeypatch, ["just-akash", "api", "nonexistent"])
+        client = MockAPI.return_value
+        client.get_deployment.return_value = {
+            "deployment": {"state": "active"},
+            "leases": [],
+        }
+        with pytest.raises(SystemExit) as exc_info:
+            _run_cli(monkeypatch, ["just-akash", "exec", "--dseq", "12345", "echo hello"])
+        assert exc_info.value.code == 1
         captured = capsys.readouterr()
-        assert "usage:" in captured.out.lower() or captured.out == ""
+        assert "SSH-enabled SDL" in captured.err
+        assert "lease-shell" in captured.err
+
+
+class TestCliInjectNoSsh:
+    @patch("just_akash.api._extract_ssh_info", return_value=None)
+    @patch("just_akash.api.AkashConsoleAPI")
+    def test_inject_no_ssh_shows_warning(self, MockAPI, mock_ssh, monkeypatch, capsys):
+        monkeypatch.setenv("AKASH_API_KEY", "test-key")
+        client = MockAPI.return_value
+        client.get_deployment.return_value = {
+            "deployment": {"state": "active"},
+            "leases": [],
+        }
+        with pytest.raises(SystemExit) as exc_info:
+            _run_cli(
+                monkeypatch,
+                ["just-akash", "inject", "--dseq", "12345", "--env", "SECRET=value"],
+            )
+        assert exc_info.value.code == 1
+        captured = capsys.readouterr()
+        assert "SSH-enabled SDL" in captured.err
+        assert "lease-shell" in captured.err

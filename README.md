@@ -4,13 +4,15 @@ Justfile recipes + Python CLI for deploying on [Akash Network](https://akash.net
 
 Self-contained — clone, configure `.env`, and run.
 
-## ✨ What's New in v1.3.0
+## What's New in v1.4.0
 
-- **200 adversarial tests** ensuring robustness against edge cases
-- **Enhanced security** with comprehensive input validation
-- **Unicode support** for international characters and tags
-- **Improved error handling** for network issues and malformed data
-- **59% test coverage** with extensive edge case testing
+- **Secrets injection** via SSH (`just inject` / `just-akash inject`)
+- **Remote command execution** (`just exec` / `just-akash exec`)
+- **SDL env injection** at deploy time (`--env KEY=VALUE`, provider-visible)
+- **Configurable Console API URL** via `AKASH_CONSOLE_URL` env var
+- **Unified CLI** — all commands are top-level (`deploy`, `connect`, `exec`, `inject`, `list`, `status`, `destroy`, `tag`)
+- **E2E secrets test** (`just test-secrets`) — deploy, inject, verify, cleanup
+- **357 tests** with 69% coverage
 
 ## Prerequisites
 
@@ -33,18 +35,22 @@ uv run pre-commit install   # install gitleaks + ruff hooks
 
 ### With `just` (recommended)
 
-| Command              | Usage                                      | Purpose |
-|----------------------|--------------------------------------------|---------|
-| `just up [tag]`      | `just up my-web-app`                      | Deploy SSH-enabled instance (polls bids, picks cheapest) |
-| `just connect`       | `just connect 12345` or `just connect my-web-app` | SSH into a running instance (by DSEQ or tag) |
-| `just down`          | `just down 12345` or `just down my-web-app`       | Stop an instance (by DSEQ or tag) |
-| `just down-all`      | `just down-all`                           | Stop all instances |
-| `just tag`           | `just tag 12345 my-database`              | Tag a deployment with a name |
-| `just ls`            | `just ls`                                 | List active instances |
-| `just status`        | `just status 12345` or `just status my-database` | Show instance details (by DSEQ or tag) |
-| `just test`          | `just test`                               | Full lifecycle test (up → verify → SSH → down → cleanup) |
-| `just lint`          | `just lint`                               | Ruff lint + format check |
-| `just secrets`       | `just secrets`                            | Gitleaks secret scan |
+| Command | Usage | Purpose |
+|---|---|---|
+| `just deploy` | `just deploy` | Deploy with custom SDL/image |
+| `just up [tag]` | `just up my-web-app` | Deploy SSH instance + optional tag |
+| `just connect` | `just connect 12345` | SSH into a running instance |
+| `just exec` | `just exec "" "ls -la"` | Execute a remote command |
+| `just inject` | `just inject "" .env.secrets` | Inject secrets via SSH |
+| `just destroy` | `just destroy 12345` | Destroy an instance |
+| `just destroy-all` | `just destroy-all` | Destroy all instances |
+| `just list` | `just list` | List active instances |
+| `just status` | `just status 12345` | Show instance details |
+| `just tag` | `just tag 12345 my-db` | Tag a deployment with a name |
+| `just test` | `just test` | Lifecycle test (deploy/SSH/destroy) |
+| `just test-secrets` | `just test-secrets` | Secrets injection E2E test |
+| `just lint` | `just lint` | Ruff lint + format check |
+| `just secrets` | `just secrets` | Gitleaks secret scan |
 
 ### DSEQs vs Tags
 
@@ -53,72 +59,69 @@ uv run pre-commit install   # install gitleaks + ruff hooks
 **Tags** are human-readable names you can assign to DSEQs for easier management.
 
 ```bash
-# Deploy and get a DSEQ (e.g., 12345)
-just up my-web-app
-# Output: Created deployment with DSEQ: 12345
-
-# Tag it for easy reference
-just tag 12345 my-web-app
-
-# Now you can use either:
-just status 12345       # Using DSEQ
-just status my-web-app  # Using tag
-
-just connect my-web-app # Connect using tag
-just down my-web-app    # Stop using tag
+just up my-web-app         # Deploy and tag as "my-web-app"
+just status my-web-app     # Check status using tag
+just connect my-web-app    # SSH in using tag
+just destroy my-web-app    # Destroy using tag
 ```
 
-### Quick Start Examples
+### Secrets Injection
 
-#### Deploy your first instance:
+Inject secrets into a running deployment via SSH (never exposed in the SDL or to the provider):
+
 ```bash
-just up hello-world
-```
-This creates an SSH-enabled Ubuntu instance, waits for bids, picks the cheapest provider, and tags it as "hello-world".
+# From a file
+just inject "" .env.secrets
 
-#### Connect and work:
-```bash
-just connect hello-world
-# SSH into your instance
-```
+# Or inline via CLI
+just-akash inject --dseq 12345 --env SECRET_KEY=abc --env DB_PASS=xyz
 
-#### Check status:
-```bash
-just ls                    # List all deployments
-just status hello-world    # Detailed status
+# Or with a file
+just-akash inject --dseq 12345 --env-file .env.secrets
 ```
 
-#### Clean up:
-```bash
-just down hello-world      # Stop this instance
-just down-all             # Stop everything
-```
+Secrets are written to `/run/secrets/.env` with `chmod 600`. Requires an SSH-enabled SDL.
 
 ### With `uv run` (direct CLI)
 
 ```bash
 # Deploy
-uv run just-akash deploy --sdl sdl/cpu-backtest-ssh.yaml --bid-wait 60 --bid-wait-retry 120
+uv run just-akash deploy --sdl sdl/cpu-backtest-ssh.yaml
 
-# API operations
-uv run just-akash api list
-uv run just-akash api status --dseq 12345
-uv run just-akash api connect --dseq 12345
-uv run just-akash api close --dseq 12345
-uv run just-akash api tag --dseq 12345 --name my-job
+# Deploy with env vars (provider-visible)
+uv run just-akash deploy --sdl sdl/cpu-backtest-ssh.yaml --env REGION=us-east
 
-# Lifecycle test
-uv run python -m just_akash.test_lifecycle
+# Connect / exec / inject
+uv run just-akash connect --dseq 12345
+uv run just-akash exec --dseq 12345 "echo hello"
+uv run just-akash inject --dseq 12345 --env-file .env.secrets
+
+# List / status / destroy
+uv run just-akash list
+uv run just-akash status --dseq 12345
+uv run just-akash destroy --dseq 12345
+uv run just-akash tag --dseq 12345 --name my-job
 ```
 
 ## Environment Variables
 
 | Variable | Required | Description |
-|----------|----------|-------------|
+|---|---|---|
 | `AKASH_API_KEY` | Yes | Console API key |
 | `AKASH_PROVIDERS` | No | Comma-separated allowlist of provider addresses (empty = accept any) |
 | `SSH_PUBKEY` | For SSH SDL | SSH public key (injected into container) |
+| `AKASH_CONSOLE_URL` | No | Console API base URL (default: `https://console-api.akash.network`) |
 | `AKASH_DEBUG` | No | Set to `1` for verbose API/deploy logging |
+
+## SSH Requirement
+
+The `connect`, `exec`, and `inject` commands require SSH to be configured in the SDL:
+
+1. Port 22 exposed in the SDL
+2. `SSH_PUBKEY` set in `.env` (injected as `SSH_PUBKEY_B64` placeholder)
+3. Container entrypoint runs `sshd`
+
+The default SSH SDL (`sdl/cpu-backtest-ssh.yaml`) handles all of this. The Akash Console API does not support lease-shell — SSH is the only remote execution path.
 
 ## Bid Selection
 
