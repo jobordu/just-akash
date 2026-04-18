@@ -2,11 +2,22 @@
 
 ## What This Is
 
-A Python CLI and Justfile recipe set for deploying workloads on Akash Network via the Console API. Users configure a `.env`, run `just up` or `just-akash deploy`, and get a running SSH-accessible instance on decentralized cloud infrastructure. Self-contained — no extra tooling beyond `uv` and optionally `just`.
+A Python CLI and Justfile recipe set for deploying workloads on Akash Network via the Console API. Users configure a `.env`, run `just up` or `just-akash deploy`, and get a running instance on decentralized cloud infrastructure. Supports both lease-shell (default) and SSH transports for remote access. Self-contained — no extra tooling beyond `uv` and optionally `just`.
 
 ## Core Value
 
-Fastest path from "I want something running on Akash" to a live, SSH-accessible instance — single command, no manual portal steps.
+Fastest path from "I want something running on Akash" to a live, remotely-accessible instance — single command, no manual portal steps.
+
+## Current Milestone: v1.5 — Lease-Shell Transport
+
+**Goal:** Replace SSH as the default transport with Akash's native `lease-shell` WebSocket mechanism across all shell-dependent commands.
+
+**Target features:**
+- lease-shell WebSocket transport for `exec`, `inject`, and `connect`/`shell` commands
+- lease-shell as default; SSH opt-in via `--transport ssh` flag
+- Interactive shell session via lease-shell (new `shell` command or enhanced `connect`)
+- Secrets injection via lease-shell (replace SSH SCP path)
+- Test coverage for lease-shell transport
 
 ## Profile: cli-tool
 
@@ -37,7 +48,11 @@ Fastest path from "I want something running on Akash" to a live, SSH-accessible 
 
 ### Active
 
-<!-- To be defined in new milestone -->
+- [ ] lease-shell WebSocket transport as default for exec, inject, connect
+- [ ] `--transport ssh` flag to opt-in to SSH transport
+- [ ] Interactive shell session via lease-shell
+- [ ] Secrets injection via lease-shell (no SSH dependency)
+- [ ] Test coverage for lease-shell transport
 
 ### Out of Scope
 
@@ -47,9 +62,10 @@ Fastest path from "I want something running on Akash" to a live, SSH-accessible 
 
 - Python 3.10+, `uv` for package management, `just` for task runner
 - Akash Network Console API for deployments (no direct chain interaction)
-- SSH-based access model: provider starts container, user SSHes in
+- SSH-based access model in v1.4; v1.5 switches default to Akash lease-shell WebSocket API
 - 357 tests at 69% coverage as of v1.4.0
-- Branch `feature/issue-1-add-websocket-shell-transport` suggests next feature is WebSocket shell transport
+- Akash Console exposes a lease-shell endpoint for WebSocket-based interactive shell access
+- Goal: enable programmatic shell access without requiring SSH keys or port 22
 
 ## Constraints
 
@@ -65,4 +81,4 @@ Fastest path from "I want something running on Akash" to a live, SSH-accessible 
 | `uv` as package manager | Fast, modern, handles virtualenvs cleanly | ✓ Good |
 
 ---
-*Last updated: 2026-04-18 — nForma bootstrap from existing codebase (v1.4.0)*
+*Last updated: 2026-04-18 — Milestone v1.5 started*

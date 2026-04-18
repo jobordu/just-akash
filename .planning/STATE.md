@@ -4,9 +4,8 @@
 
 Phase: Not started (defining requirements)
 Plan: —
-Status: Bootstrapping planning infrastructure
-
-Last activity: 2026-04-18 — nForma initialized from existing codebase
+Status: Defining requirements
+Last activity: 2026-04-18 — Milestone v1.5 started
 
 ## Project Reference
 
