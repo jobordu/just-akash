@@ -220,37 +220,60 @@ class TestMakeTransportRouting:
 # ---------------------------------------------------------------------------
 
 class TestLeaseShellStubBehaviour:
-    """Phase 6 stub raises NotImplementedError on every method call."""
+    """Phase 7+: LeaseShellTransport implements prepare() + exec()."""
 
-    def _t(self):
+    def _t_no_deployment(self):
+        """Lease shell transport without deployment data."""
         from just_akash.transport import LeaseShellTransport, TransportConfig
         return LeaseShellTransport(TransportConfig(dseq="1", api_key="k"))
 
-    def test_prepare_raises(self):
-        with pytest.raises(NotImplementedError, match="not yet implemented"):
-            self._t().prepare()
+    def _t_with_deployment(self):
+        """Lease shell transport with valid deployment data."""
+        from just_akash.transport import LeaseShellTransport, TransportConfig
+        return LeaseShellTransport(TransportConfig(
+            dseq="1",
+            api_key="k",
+            deployment={
+                "leases": [{
+                    "provider": {"hostUri": "https://provider.example.com"},
+                    "status": {"services": {"web": {}}},
+                }]
+            },
+        ))
 
-    def test_exec_raises(self):
-        with pytest.raises(NotImplementedError):
-            self._t().exec("echo hi")
+    def test_prepare_raises_when_no_deployment(self):
+        """Phase 7: prepare() needs deployment data."""
+        with pytest.raises(RuntimeError, match="No leases found"):
+            self._t_no_deployment().prepare()
+
+    def test_prepare_works_with_deployment(self):
+        """Phase 7: prepare() now works with valid deployment."""
+        t = self._t_with_deployment()
+        t.prepare()
+        assert t._ws_url is not None
+
+    def test_exec_raises_when_no_deployment(self):
+        """Phase 7: exec() needs deployment data."""
+        with pytest.raises(RuntimeError, match="No leases found"):
+            self._t_no_deployment().exec("echo hi")
 
     def test_inject_raises(self):
+        """Phase 8+: inject() still not implemented."""
         with pytest.raises(NotImplementedError):
-            self._t().inject("/tmp/x", "content")
+            self._t_with_deployment().inject("/tmp/x", "content")
 
     def test_connect_raises(self):
+        """Phase 9+: connect() still not implemented."""
         with pytest.raises(NotImplementedError):
-            self._t().connect()
+            self._t_with_deployment().connect()
 
-    def test_validate_returns_false(self):
-        assert self._t().validate() is False
+    def test_validate_returns_false_without_hostUri(self):
+        """validate() returns False when no hostUri."""
+        assert self._t_no_deployment().validate() is False
 
-    def test_error_message_mentions_ssh_fallback(self):
-        """User-facing error message guides toward --transport ssh."""
-        try:
-            self._t().prepare()
-        except NotImplementedError as e:
-            assert "ssh" in str(e).lower()
+    def test_validate_returns_true_with_hostUri(self):
+        """validate() returns True when hostUri present."""
+        assert self._t_with_deployment().validate() is True
 
 
 # ---------------------------------------------------------------------------
