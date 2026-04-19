@@ -102,7 +102,7 @@ def main():
         lease_ready = False
         for attempt in range(1, 6):
             r = run(f"uv run just-akash status --dseq {dseq}", timeout=30)
-            if "hostUri" in r.stdout or "host_uri" in r.stdout:
+            if "endpoint" in r.stdout or "ssh_host" in r.stdout or "ready" in r.stdout:
                 lease_ready = True
                 break
             if attempt < 5:
@@ -140,8 +140,9 @@ def main():
                     tmp.write("TEST_SECRET=injected_value\n")
                     env_file = tmp.name
 
+                remote_path = "/tmp/e2e-test.env"
                 r = run(
-                    f"uv run just-akash inject --env-file {env_file} --dseq {dseq}",
+                    f"uv run just-akash inject --env-file {env_file} --remote-path {remote_path} --dseq {dseq}",
                     timeout=30,
                 )
                 if r.returncode != 0:
@@ -150,7 +151,7 @@ def main():
                 else:
                     log_pass("inject: env file uploaded")
                     r = run(
-                        f"uv run just-akash exec 'cat /tmp/test.env' --dseq {dseq}",
+                        f"uv run just-akash exec 'cat {remote_path}' --dseq {dseq}",
                         timeout=30,
                     )
                     if r.returncode == 0 and "injected_value" in r.stdout:
