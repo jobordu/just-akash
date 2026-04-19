@@ -98,7 +98,10 @@ Plans:
 **Success Criteria** (what must be TRUE):
   1. `just test-shell` deploys an instance, runs exec, inject, and connect via lease-shell, and tears the deployment down — passing green from a clean environment
   2. Unit tests for the transport layer run without a network connection by using a mocked WebSocket, and cover normal operation, token refresh, and connection error paths
-**Plans**: TBD
+**Plans**: 2 plans
+Plans:
+- [ ] 11-01-PLAN.md — Unit tests: tests/test_transport_errors.py (8 tests — token expiry 4001/4003, reason-string detection, max-reconnect exhaustion, non-auth close propagation, frame 103, fresh JWT verification)
+- [ ] 11-02-PLAN.md — E2E orchestrator: just_akash/test_shell_e2e.py + `just test-shell` Justfile recipe
 
 ## Progress
 
@@ -109,4 +112,4 @@ Plans:
 | 8. Secrets Injection via Lease-Shell | 1/1 | Complete | 2026-04-19 |
 | 9. Interactive Shell | 0/3 | Not started | - |
 | 10. Default Transport Switch and Fallback | 0/TBD | Complete    | 2026-04-19 |
-| 11. Test Coverage | 0/TBD | Not started | - |
+| 11. Test Coverage | 0/2 | Planned (2026-04-19) | - |

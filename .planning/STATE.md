@@ -5,16 +5,16 @@
 See: .planning/PROJECT.md (updated 2026-04-19)
 
 **Core value:** Fastest path from "I want something running on Akash" to a live, remotely-accessible instance — single command, no manual portal steps.
-**Current focus:** Phase 11 — Test Coverage (v1.5)
+**Current focus:** Phase 11 — Test Coverage (v1.5) — PLANNED, ready to execute
 
 ## Current Position
 
-Phase: 10 of 11 (Default Transport Switch and Fallback) — IN PROGRESS
-Plan: 2 of 2 in phase 10 (COMPLETE)
-Status: Phase 10-02 complete — lease-shell default with SSH fallback; all tests passing
-Last activity: 2026-04-19 — Phase 10 Plan 02 (Default transport switch) executed successfully
+Phase: 11 of 11 (Test Coverage) — PLANNED
+Plan: 0 of 2 in phase 11 (not yet executed)
+Status: Phase 11 planning complete — 2 plans written, ready for `/nf:execute-phase 11`
+Last activity: 2026-04-19 — Phase 11 plans created (11-01-PLAN.md, 11-02-PLAN.md)
 
-Progress: [████████████████████] 10/10 plans in phases 6-10 (100%)
+Progress: [████████████████████] 10/10 plans in phases 6-10 (100%) + Phase 11 planned
 
 ## Performance Metrics
 
@@ -55,19 +55,20 @@ Progress: [████████████████████] 10/10 p
 - [Phase 07-lease-shell-exec]: Output NOT replayed on reconnect; accumulated stdout/stderr persists, new frames resume streaming
 - **[Phase 10-02] Lease-shell is now default transport** — users get lease-shell by default; SSH via --transport ssh
 - **[Phase 10-02] Automatic fallback via validate() check** — when lease-shell unavailable, falls back to SSH with notice to stderr
+- **[Phase 11] test_transport_errors.py is a standalone file** — FakeWebSocket copied (not imported) to avoid cross-file coupling
+- **[Phase 11] connect() E2E is manual-only** — subprocess-based E2E cannot automate full-duplex TTY; inject-verify-via-exec is the automated substitute
 
 ### Pending Todos
 
-None yet.
+None.
 
 ### Blockers/Concerns
 
 - Self-signed cert acceptance (Phase 7 shortcut) — cert pinning deferred, review before shipping v1.5
 - Transport fallback duplicated 3× in cli.py (cleanup report recommends extracting helper) — low urgency
-- Phase 11 (test coverage) is the final phase — E2E recipe + unit tests for transport layer
 
 ## Session Continuity
 
 Last session: 2026-04-19
-Stopped at: Phase 10 complete — all 2 plans executed, 483 tests passing, VERIFICATION.md: passed. Ready to plan Phase 11 (Test Coverage).
+Stopped at: Phase 11 plans written — 11-01-PLAN.md (TEST-02 unit tests, Wave 1) and 11-02-PLAN.md (TEST-01 E2E orchestrator + Justfile recipe, Wave 1). Both plans are Wave 1 and can execute in parallel.
 Resume file: None
