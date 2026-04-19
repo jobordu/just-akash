@@ -1,8 +1,8 @@
 ---
 phase: 8
 slug: secrets-injection-via-lease-shell
-status: draft
-nyquist_compliant: false
+status: approved
+nyquist_compliant: true
 wave_0_complete: false
 created: 2026-04-19
 ---
@@ -19,12 +19,12 @@ created: 2026-04-19
 
 | Property | Value |
 |----------|-------|
-| **Framework** | {pytest 7.x / jest 29.x / vitest / go test / other} |
-| **Config file** | {path/to/pytest.ini or "none — Wave 0 installs"} |
-| **Quick run command** | `{e.g., pytest -x --tb=short}` |
-| **Full suite command** | `{e.g., pytest tests/ --tb=short}` |
-| **Estimated runtime** | ~{N} seconds |
-| **CI pipeline** | {.github/workflows/test.yml — exists / needs creation} |
+| **Framework** | Pytest |
+| **Config file** | pyproject.toml (`[tool.pytest.ini_options]`) |
+| **Quick run command** | `pytest -x --tb=short` |
+| **Full suite command** | `pytest --tb=short` |
+| **Estimated runtime** | ~30 seconds |
+| **CI pipeline** | .github/workflows/test.yml — exists |
 
 ---
 
@@ -32,10 +32,10 @@ created: 2026-04-19
 
 > The minimum feedback frequency required to reliably catch errors in this phase.
 
-- **After every task commit:** Run `{quick run command}`
-- **After every plan wave:** Run `{full suite command}`
+- **After every task commit:** Run `pytest -x --tb=short`
+- **After every plan wave:** Run `pytest --tb=short`
 - **Before `/nf:verify-work`:** Full suite must be green
-- **Maximum acceptable task feedback latency:** {N} seconds
+- **Maximum acceptable task feedback latency:** 30 seconds
 
 ---
 
@@ -43,9 +43,8 @@ created: 2026-04-19
 
 | Task ID | Plan | Wave | Requirement | Test Type | Automated Command | File Exists | Status |
 |---------|------|------|-------------|-----------|-------------------|-------------|--------|
-| {N}-01-01 | 01 | 1 | REQ-{XX} | unit | `pytest tests/test_{module}.py::test_{name} -x` | ✅ / ❌ W0 | ⬜ pending |
-| {N}-01-02 | 01 | 1 | REQ-{XX} | integration | `pytest tests/test_{flow}.py -x` | ✅ / ❌ W0 | ⬜ pending |
-| {N}-02-01 | 02 | 2 | REQ-{XX} | smoke | `curl -s {endpoint} \| grep {expected}` | ✅ N/A | ⬜ pending |
+| 08-01-01 | 01 | 1 | INJS-01, INJS-02 | unit | `pytest tests/test_transport_inject.py -v` | ❌ W0 (created in task) | ⬜ pending |
+| 08-01-02 | 01 | 1 | INJS-01, INJS-02 | unit+integration | `pytest tests/test_transport_inject.py tests/test_transport.py tests/test_transport_cli_integration.py --tb=short` | ✅ | ⬜ pending |
 
 *Status values: ⬜ pending · ✅ green · ❌ red · ⚠️ flaky*
 
@@ -55,24 +54,17 @@ created: 2026-04-19
 
 > Test scaffolding committed BEFORE any implementation task. Executor runs Wave 0 first.
 
-- [ ] `{tests/test_file.py}` — stubs for REQ-{XX}, REQ-{XX}
-- [ ] `{tests/conftest.py}` — shared fixtures
-- [ ] `{framework install}` — if no framework detected
+Existing infrastructure covers all phase requirements — no Wave 0 test tasks needed.
 
-*If none required: "Existing infrastructure covers all phase requirements — no Wave 0 test tasks needed."*
+Note: `tests/test_transport_inject.py` is created in Task 1 (RED phase of TDD), not as a separate Wave 0 step. The test file is the scaffolding; Task 2 (GREEN) implements against it.
 
 ---
 
 ## Manual-Only Verifications
 
-> Behaviors that genuinely cannot be automated, with justification.
-> These are surfaced during `/nf:verify-work` UAT.
+All phase behaviors have automated verification coverage.
 
-| Behavior | Requirement | Why Manual | Test Instructions |
-|----------|-------------|------------|-------------------|
-| {behavior} | REQ-{XX} | {reason: visual, third-party auth, physical device...} | {step-by-step} |
-
-*If none: "All phase behaviors have automated verification coverage."*
+INJS-02 (no secret in stdout) is verified by `test_inject_secret_value_not_in_exec_command_plaintext` which asserts the raw secret string never appears in any `exec()` command argument.
 
 ---
 
@@ -80,14 +72,14 @@ created: 2026-04-19
 
 Updated by `nf-plan-checker` when plans are approved:
 
-- [ ] All tasks have `<automated>` verify commands or Wave 0 dependencies
-- [ ] No 3 consecutive implementation tasks without automated verify (sampling continuity)
-- [ ] Wave 0 test files cover all MISSING references
-- [ ] No watch-mode flags in any automated command
-- [ ] Feedback latency per task: < {N}s ✅
-- [ ] `nyquist_compliant: true` set in frontmatter
+- [x] All tasks have `<automated>` verify commands or Wave 0 dependencies
+- [x] No 3 consecutive implementation tasks without automated verify (sampling continuity)
+- [x] Wave 0 test files cover all MISSING references
+- [x] No watch-mode flags in any automated command
+- [x] Feedback latency per task: < 30s ✅
+- [x] `nyquist_compliant: true` set in frontmatter
 
-**Plan-checker approval:** {pending / approved on YYYY-MM-DD}
+**Plan-checker approval:** approved on 2026-04-19
 
 ---
 
@@ -97,8 +89,6 @@ Updated during `/nf:execute-phase 8`:
 
 | Wave | Tasks | Tests Run | Pass | Fail | Sampling Status |
 |------|-------|-----------|------|------|-----------------|
-| 0 | {N} | — | — | — | scaffold |
-| 1 | {N} | {command} | {N} | {N} | ✅ sampled |
-| 2 | {N} | {command} | {N} | {N} | ✅ sampled |
+| 1 | 2 | `pytest --tb=short` | TBD | TBD | ⬜ pending |
 
-**Phase validation complete:** {pending / YYYY-MM-DD HH:MM}
+**Phase validation complete:** pending
