@@ -5,16 +5,16 @@
 See: .planning/PROJECT.md (updated 2026-04-19)
 
 **Core value:** Fastest path from "I want something running on Akash" to a live, remotely-accessible instance — single command, no manual portal steps.
-**Current focus:** Phase 9 — Interactive Shell (v1.5)
+**Current focus:** Phase 10 — Default Transport Switch and Fallback (v1.5)
 
 ## Current Position
 
-Phase: 8 of 11 (Secrets Injection via Lease-Shell) — COMPLETE
-Plan: 1 of 1 in phase 8 (COMPLETE)
-Status: Phase 8 complete — LeaseShellTransport.inject() implemented; 461 tests passing
-Last activity: 2026-04-19 — Phase 8 Plan 1 (inject() TDD) executed successfully
+Phase: 9 of 11 (Interactive Shell) — COMPLETE
+Plan: 3 of 3 in phase 9 (COMPLETE)
+Status: Phase 9 complete — LeaseShellTransport.connect() implemented; 475 tests passing
+Last activity: 2026-04-19 — Phase 9 Plans 1-3 (TTY interactive shell) executed successfully
 
-Progress: [████████████████████] 5/5 plans (100%)
+Progress: [████████████████████] 8/8 plans (100%)
 
 ## Performance Metrics
 
@@ -60,11 +60,11 @@ None yet.
 
 ### Blockers/Concerns
 
-- Self-signed cert acceptance (Phase 7 shortcut) — cert pinning deferred to Phase 9+; review before shipping v1.5
-- Phase 9 (connect/interactive TTY) is next — reuses exec() WebSocket infrastructure; adds TTY setup and signal forwarding
+- Self-signed cert acceptance (Phase 7 shortcut) — cert pinning deferred to Phase 10+; review before shipping v1.5
+- Phase 10 (default transport switch + fallback) is next — switches default from SSH to lease-shell; adds fallback logic
 
 ## Session Continuity
 
 Last session: 2026-04-19
-Stopped at: Phase 8 complete — 1 plan executed, 461 tests passing, VERIFICATION.md: passed. Ready for Phase 9 (Interactive Shell).
+Stopped at: Phase 9 complete — 3 plans executed, 475 tests passing, VERIFICATION.md: passed. Ready for Phase 10 (Default Transport Switch and Fallback).
 Resume file: None

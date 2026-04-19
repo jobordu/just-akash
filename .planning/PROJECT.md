@@ -61,6 +61,10 @@ Fastest path from "I want something running on Akash" to a live, remotely-access
 - ✓ EXEC-01: `just exec CMD` runs command on remote container over WebSocket — Phase 7
 - ✓ EXEC-02: Remote command exit code propagated as CLI exit code — Phase 7
 - ✓ EXEC-03: Remote stdout and stderr streamed to local output in real time — Phase 7
+- ✓ SHLL-01: Interactive TTY session via `just connect` over lease-shell — Phase 9
+- ✓ SHLL-02: Terminal size (rows × columns) sent to remote on connect — Phase 9
+- ✓ SHLL-03: Ctrl+C forwarded to remote process (not swallowed) — Phase 9
+- ✓ SHLL-04: Terminal restored to cooked mode on all exit paths — Phase 9
 
 ### Out of Scope
 
@@ -92,6 +96,8 @@ Fastest path from "I want something running on Akash" to a live, remotely-access
 | JWT TTL request 3600s, accept 30s cap | Server may ignore TTL; token-refresh handles the expiry transparently | ✓ Good |
 | Token-expiry detection via close codes 4001/4003 + keyword matching | Covers both protocol-spec close codes and free-text reason strings from providers | ✓ Good |
 | Output NOT replayed on reconnect | Accumulated stdout/stderr persists; new frames resume streaming without duplication | ✓ Good |
+| `except TimeoutError` only in I/O loop (not `except Exception`) | Generic exception catch causes infinite loops in test mocks; websockets uses TimeoutError for recv timeout | ✓ Good |
+| SIGWINCH handler uses stored `_last_size` fallback | `os.get_terminal_size()` fails after session ends; fallback to last known size enables clean handler invocation | ✓ Good |
 
 ---
-*Last updated: 2026-04-19 — Phase 7 (Lease-Shell Exec) complete*
+*Last updated: 2026-04-19 — Phase 9 (Interactive Shell) complete*
