@@ -22,7 +22,7 @@ Phases 1-5 delivered secrets injection via SSH, remote exec, SDL env injection, 
 - [ ] **Phase 7: Lease-Shell Exec** - Non-interactive command execution over lease-shell with exit code and output streaming
 - [ ] **Phase 8: Secrets Injection via Lease-Shell** - File/secret delivery over lease-shell without SSH or SCP
 - [ ] **Phase 9: Interactive Shell** - Full TTY shell session over lease-shell with signal handling and terminal cleanup
-- [ ] **Phase 10: Default Transport Switch and Fallback** - Lease-shell becomes default; SSH opt-in; auto-fallback when lease-shell unavailable
+- [x] **Phase 10: Default Transport Switch and Fallback** - Lease-shell becomes default; SSH opt-in; auto-fallback when lease-shell unavailable (completed 2026-04-19)
 - [ ] **Phase 11: Test Coverage** - E2E recipe and unit tests for the transport layer
 
 ## Phase Details
@@ -108,5 +108,5 @@ Plans:
 | 7. Lease-Shell Exec | 0/2 | Not started | - |
 | 8. Secrets Injection via Lease-Shell | 1/1 | Complete | 2026-04-19 |
 | 9. Interactive Shell | 0/3 | Not started | - |
-| 10. Default Transport Switch and Fallback | 0/TBD | Not started | - |
+| 10. Default Transport Switch and Fallback | 0/TBD | Complete    | 2026-04-19 |
 | 11. Test Coverage | 0/TBD | Not started | - |
