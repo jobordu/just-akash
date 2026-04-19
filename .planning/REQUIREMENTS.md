@@ -15,7 +15,7 @@
 
 - [ ] **LSHL-01**: Protocol implementation is derived from reverse-engineered console.akash.network WebSocket handshake (endpoint URL, auth headers, frame format)
 - [ ] **LSHL-02**: Lease-shell WebSocket connection authenticates using the existing AKASH_API_KEY
-- [ ] **LSHL-03**: Token expiry during long sessions triggers automatic re-authentication without dropping the user session
+- [x] **LSHL-03**: Token expiry during long sessions triggers automatic re-authentication without dropping the user session
 
 ### Exec
 
@@ -71,7 +71,7 @@
 | TRNS-03 | Phase 10 | Pending |
 | LSHL-01 | Phase 6 | Pending |
 | LSHL-02 | Phase 7 | Pending |
-| LSHL-03 | Phase 7 | Pending |
+| LSHL-03 | Phase 7 | Complete |
 | EXEC-01 | Phase 7 | Pending |
 | EXEC-02 | Phase 7 | Pending |
 | EXEC-03 | Phase 7 | Pending |
