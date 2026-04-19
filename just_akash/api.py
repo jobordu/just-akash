@@ -285,6 +285,32 @@ class AkashConsoleAPI:
             return {}
         return response
 
+    def create_jwt(self, dseq: str, ttl: int = 3600) -> str:
+        """Request a short-lived JWT for lease-shell auth.
+
+        POSTs to /v1/create-jwt-token with the existing api_key.
+        Returns the JWT string. Raises RuntimeError on HTTP error.
+
+        Args:
+            dseq: Deployment sequence number (string).
+            ttl:  Requested TTL in seconds (server default is 30s; request 3600 and
+                  fall back to reconnect if server caps it — see LSHL-03 in Phase 7).
+        """
+        response = self._request(
+            "POST",
+            "/v1/create-jwt-token",
+            {"data": {"ttl": ttl, "leases": {dseq: {"access": "full"}}}},
+        )
+        # Response shape: { "data": { "token": "<JWT>" } }
+        if not isinstance(response, dict):
+            raise RuntimeError(f"Unexpected JWT response type: {type(response)}")
+        data = response.get("data", response)
+        if isinstance(data, dict) and "token" in data:
+            token = data["token"]
+            if isinstance(token, str) and token:
+                return token
+        raise RuntimeError(f"JWT token not found in response: {response}")
+
 
 def _extract_dseq(deployment: dict[str, Any]) -> str | None:
     if not isinstance(deployment, dict):
