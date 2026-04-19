@@ -1,8 +1,8 @@
 ---
 phase: 6
 slug: transport-abstraction-foundation
-status: draft
-nyquist_compliant: false
+status: approved
+nyquist_compliant: true
 wave_0_complete: false
 created: 2026-04-18
 ---
@@ -44,11 +44,12 @@ created: 2026-04-18
 | Task ID | Plan | Wave | Requirement | Test Type | Automated Command | File Exists | Status |
 |---------|------|------|-------------|-----------|-------------------|-------------|--------|
 | 06-01-01 | 01 | 0 | LSHL-01, TRNS-02 | unit | `pytest tests/test_transport.py -x --tb=short` | ❌ W0 | ⬜ pending |
-| 06-01-02 | 01 | 1 | TRNS-02 | unit | `pytest tests/test_transport.py::TestSSHTransport -x --tb=short` | ✅ | ⬜ pending |
-| 06-01-03 | 01 | 1 | TRNS-02 | unit | `pytest tests/test_transport.py::TestLeaseShellTransportStub -x --tb=short` | ✅ | ⬜ pending |
-| 06-01-04 | 01 | 2 | TRNS-02 | integration | `pytest tests/test_cli.py -x --tb=short` | ✅ | ⬜ pending |
-| 06-01-05 | 01 | 2 | LSHL-01 | manual | Review `docs/PROTOCOL.md` for endpoint, auth, frame schema | N/A | ⬜ pending |
-| 06-01-06 | 01 | 2 | TRNS-02 | smoke | `pytest --tb=short` (full suite — zero regressions) | ✅ | ⬜ pending |
+| 06-01-02 | 01 | 1 | TRNS-02 | unit | `pytest tests/test_transport.py::TestSSHTransport -x --tb=short` | ❌ W0 | ⬜ pending |
+| 06-01-03 | 01 | 1 | TRNS-02 | unit | `pytest tests/test_transport.py::TestLeaseShellTransportStub -x --tb=short` | ❌ W0 | ⬜ pending |
+| 06-01-04 | 01 | 1 | TRNS-02 | smoke | `python3 -c "import websockets, pexpect; print('deps OK')"` | ✅ N/A | ⬜ pending |
+| 06-02-01 | 02 | 2 | TRNS-02 | integration | `pytest tests/test_cli.py -x --tb=short` | ✅ | ⬜ pending |
+| 06-02-02 | 02 | 2 | LSHL-01 | manual | Review `docs/PROTOCOL.md` for endpoint URL, auth headers, frame schema | N/A | ⬜ pending |
+| 06-02-03 | 02 | 2 | TRNS-02 | smoke | `pytest --tb=short` (full suite regression) | ✅ | ⬜ pending |
 
 *Status values: ⬜ pending · ✅ green · ❌ red · ⚠️ flaky*
 
@@ -76,14 +77,14 @@ created: 2026-04-18
 
 Updated by `nf-plan-checker` when plans are approved:
 
-- [ ] All tasks have `<automated>` verify commands or Wave 0 dependencies
-- [ ] No 3 consecutive implementation tasks without automated verify (sampling continuity)
-- [ ] Wave 0 test files cover all MISSING references
-- [ ] No watch-mode flags in any automated command
-- [ ] Feedback latency per task: < 30s ✅
-- [ ] `nyquist_compliant: true` set in frontmatter
+- [x] All tasks have `<automated>` verify commands or Wave 0 dependencies
+- [x] No 3 consecutive implementation tasks without automated verify (sampling continuity)
+- [x] Wave 0 test files cover all MISSING references (`tests/test_transport.py` — Wave 0 task)
+- [x] No watch-mode flags in any automated command
+- [x] Feedback latency per task: < 30s ✅
+- [x] `nyquist_compliant: true` set in frontmatter
 
-**Plan-checker approval:** pending
+**Plan-checker approval:** approved 2026-04-18
 
 ---
 
@@ -93,8 +94,8 @@ Updated during `/nf:execute-phase 6`:
 
 | Wave | Tasks | Tests Run | Pass | Fail | Sampling Status |
 |------|-------|-----------|------|------|-----------------|
-| 0 | TBD | — | — | — | scaffold |
-| 1 | TBD | `pytest tests/test_transport.py -x --tb=short` | — | — | ⬜ pending |
-| 2 | TBD | `pytest --tb=short` | — | — | ⬜ pending |
+| 0 | 1 | `pytest tests/test_transport.py --collect-only` | — | — | scaffold |
+| 1 | 3 | `pytest tests/test_transport.py -x --tb=short` | — | — | ⬜ pending |
+| 2 | 3 | `pytest --tb=short` | — | — | ⬜ pending |
 
 **Phase validation complete:** pending
