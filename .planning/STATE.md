@@ -9,12 +9,12 @@ See: .planning/PROJECT.md (updated 2026-04-19)
 
 ## Current Position
 
-Phase: 9 of 11 (Interactive Shell) — COMPLETE
-Plan: 3 of 3 in phase 9 (COMPLETE)
-Status: Phase 9 complete — LeaseShellTransport.connect() implemented; 475 tests passing
-Last activity: 2026-04-19 — Phase 9 Plans 1-3 (TTY interactive shell) executed successfully
+Phase: 10 of 11 (Default Transport Switch and Fallback) — IN PROGRESS
+Plan: 2 of 2 in phase 10 (COMPLETE)
+Status: Phase 10-02 complete — lease-shell default with SSH fallback; all tests passing
+Last activity: 2026-04-19 — Phase 10 Plan 02 (Default transport switch) executed successfully
 
-Progress: [████████████████████] 8/8 plans (100%)
+Progress: [████████████████████] 10/10 plans in phases 6-10 (100%)
 
 ## Performance Metrics
 
@@ -53,6 +53,8 @@ Progress: [████████████████████] 8/8 pla
 - **[07-01] JWT TTL fallback logic** — request 3600s but accept server cap (30s); Phase 8 handles refresh
 - [Phase 07-lease-shell-exec]: Token-expiry detection via close codes 4001/4003 + keyword matching on reason strings
 - [Phase 07-lease-shell-exec]: Output NOT replayed on reconnect; accumulated stdout/stderr persists, new frames resume streaming
+- **[Phase 10-02] Lease-shell is now default transport** — users get lease-shell by default; SSH via --transport ssh
+- **[Phase 10-02] Automatic fallback via validate() check** — when lease-shell unavailable, falls back to SSH with notice to stderr
 
 ### Pending Todos
 
@@ -66,5 +68,5 @@ None yet.
 ## Session Continuity
 
 Last session: 2026-04-19
-Stopped at: Phase 9 complete — 3 plans executed, 475 tests passing, VERIFICATION.md: passed. Ready for Phase 10 (Default Transport Switch and Fallback).
+Stopped at: Phase 10-02 complete — Default Transport Switch and Fallback. Lease-shell is now default with automatic SSH fallback. All tests passing. Ready for Phase 11 (Test Coverage).
 Resume file: None
