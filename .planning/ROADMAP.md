@@ -36,7 +36,9 @@ Phases 1-5 delivered secrets injection via SSH, remote exec, SDL env injection, 
   2. `--transport ssh` flag is accepted on exec, inject, and connect commands and routes to SSH transport
   3. The lease-shell WebSocket endpoint URL, auth header format, and message frame schema are documented in a protocol note derived from console.akash.network traffic inspection
   4. `just_akash/transport/` package exists with a Transport base class, SSHTransport implementation, and LeaseShellTransport stub
-**Plans**: TBD
+**Plans**: 2 plans
+- [ ] 06-01-PLAN.md — Transport package foundation (base.py, SSHTransport, LeaseShellTransport stub, pyproject.toml deps, Wave 0 tests)
+- [ ] 06-02-PLAN.md — CLI --transport flag wiring + docs/PROTOCOL.md protocol note
 
 ### Phase 7: Lease-Shell Exec
 **Goal**: Users can run remote commands over lease-shell with full output streaming and exit code propagation; auth token refresh keeps long commands alive
