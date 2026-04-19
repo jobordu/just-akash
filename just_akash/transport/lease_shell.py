@@ -10,10 +10,17 @@ Protocol reference: docs/PROTOCOL.md
 from __future__ import annotations
 
 import base64
+import fcntl
 import json
+import os
+import select
 import shlex
+import signal
 import ssl
+import struct
 import sys
+import termios
+import tty
 import urllib.parse
 from typing import TYPE_CHECKING
 
@@ -30,6 +37,14 @@ from .base import Transport, TransportConfig
 # ------------------------------------------------------------------
 
 MAX_RECONNECT_ATTEMPTS = 3
+
+# Frame codes for lease-shell WebSocket protocol
+_FRAME_STDOUT = 100       # Remote stdout
+_FRAME_STDERR = 101       # Remote stderr
+_FRAME_RESULT = 102       # Remote exit code
+_FRAME_FAILURE = 103      # Provider error
+_FRAME_STDIN = 104        # Client stdin to remote
+_FRAME_RESIZE = 105       # Client terminal resize (big-endian uint16 rows, uint16 cols)
 
 
 def _is_auth_expiry_message(msg: str) -> bool:
@@ -305,10 +320,38 @@ class LeaseShellTransport(Transport):
             )
 
     def connect(self) -> None:
-        raise NotImplementedError(
-            "LeaseShellTransport.connect() not yet implemented. "
-            "Available in Phase 9. Use --transport ssh for now."
-        )
+        """Open interactive TTY shell session over lease-shell WebSocket.
+
+        Enters raw mode, opens WebSocket with tty=true+stdin=true, sends initial
+        terminal dimensions (SHLL-02), installs SIGINT forwarder (SHLL-03) and
+        SIGWINCH resize handler, runs bidirectional I/O loop, then unconditionally
+        restores terminal to cooked mode (SHLL-04).
+        """
+        if sys.platform == "win32":
+            raise NotImplementedError(
+                "Interactive shell via lease-shell is not supported on Windows. "
+                "Use --transport ssh or run under WSL2."
+            )
+        if not sys.stdin.isatty():
+            raise RuntimeError(
+                "connect() requires an interactive TTY; stdin is not a terminal. "
+                "Cannot run interactive shell with stdin redirected."
+            )
+        if self._ws_url is None or self._service is None:
+            self.prepare()
+
+        fd = sys.stdin.fileno()
+        original_settings = termios.tcgetattr(fd)
+
+        try:
+            tty.setraw(fd)
+            self._run_interactive_session()
+        finally:
+            # SHLL-04: Unconditional terminal restoration — must run even on crash/signal
+            termios.tcsetattr(fd, termios.TCSADRAIN, original_settings)
+
+    def _run_interactive_session(self) -> None:
+        raise NotImplementedError("_run_interactive_session not yet implemented")
 
     def validate(self) -> bool:
         """Return True if deployment has an active lease with a provider hostUri."""
