@@ -50,7 +50,9 @@ Phases 1-5 delivered secrets injection via SSH, remote exec, SDL env injection, 
   3. Both stdout and stderr from the remote process appear in local terminal output in real time
   4. When a WebSocket session token expires mid-command, the CLI silently re-authenticates and the command continues rather than crashing
   5. Authentication uses only the existing AKASH_API_KEY — no SSH key required
-**Plans**: TBD
+**Plans**: 2 plans
+- [ ] 07-01-PLAN.md — AkashConsoleAPI.create_jwt() + LeaseShellTransport.prepare() + exec() core implementation + unit tests (JWT fetch, frame dispatch, exec happy path)
+- [ ] 07-02-PLAN.md — Token-expiry reconnect loop (_exec_with_refresh, MAX_RECONNECT_ATTEMPTS) + reconnect unit tests
 
 ### Phase 8: Secrets Injection via Lease-Shell
 **Goal**: Users can inject secrets into a running container over lease-shell with no SSH or SCP dependency
@@ -96,7 +98,7 @@ Phases 1-5 delivered secrets injection via SSH, remote exec, SDL env injection, 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
 | 6. Transport Abstraction Foundation | 1/2 | In progress | 06-01 ✓ (2026-04-19) |
-| 7. Lease-Shell Exec | 0/TBD | Not started | - |
+| 7. Lease-Shell Exec | 0/2 | Not started | - |
 | 8. Secrets Injection via Lease-Shell | 0/TBD | Not started | - |
 | 9. Interactive Shell | 0/TBD | Not started | - |
 | 10. Default Transport Switch and Fallback | 0/TBD | Not started | - |
