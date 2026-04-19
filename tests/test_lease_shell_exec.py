@@ -5,9 +5,10 @@ import json
 import pytest
 from unittest.mock import MagicMock, patch, call
 
-from websockets.exceptions import ConnectionClosedOK
+from websockets.exceptions import ConnectionClosedOK, ConnectionClosedError
+from websockets.frames import Close
 
-from just_akash.transport.lease_shell import LeaseShellTransport
+from just_akash.transport.lease_shell import LeaseShellTransport, _is_auth_expiry, _is_auth_expiry_message
 from just_akash.transport.base import TransportConfig
 
 
@@ -32,6 +33,12 @@ class FakeWebSocket:
 
     def close(self):
         pass
+
+
+def make_close_error(code: int, reason: str = "") -> ConnectionClosedError:
+    """Build a ConnectionClosedError with a specific close code for testing."""
+    close_frame = Close(code=code, reason=reason)
+    return ConnectionClosedError(rcvd=close_frame, sent=None)
 
 
 # --- Fixtures ---
@@ -566,3 +573,180 @@ class TestNotImplementedMethods:
 
         with pytest.raises(NotImplementedError, match="connect.*Phase 9"):
             transport.connect()
+
+
+# --- Token Refresh Tests ---
+
+class TestTokenRefresh:
+    """Test token-expiry reconnect logic in exec()."""
+
+    def test_exec_reconnects_on_token_expiry(self):
+        """Test exec() reconnects on ConnectionClosedError with close code 4001."""
+        config = TransportConfig(
+            dseq="123",
+            api_key="key",
+            deployment=DEPLOYMENT_FIXTURE,
+        )
+        transport = LeaseShellTransport(config)
+        transport.prepare()
+
+        with patch.object(transport, "_fetch_jwt", return_value="jwt-token") as mock_fetch_jwt:
+            # Simulate two connect() calls: first raises 4001, second succeeds
+            with patch("just_akash.transport.lease_shell.connect") as mock_connect:
+                # First call: raise auth expiry
+                class FakeWSAuthExpiry:
+                    def recv(self, timeout=None):
+                        raise make_close_error(4001)
+                    def __enter__(self):
+                        return self
+                    def __exit__(self, *a):
+                        pass
+
+                # Second call: succeed with output and exit code
+                fake_ws_ok = FakeWebSocket([
+                    bytes([100]) + b"output\n",
+                    bytes([102]) + (0).to_bytes(4, "little"),
+                ])
+
+                mock_connect.side_effect = [FakeWSAuthExpiry(), fake_ws_ok]
+
+                exit_code = transport.exec("test cmd")
+
+        assert exit_code == 0
+        # Should have called _fetch_jwt twice (initial + after expiry)
+        assert mock_fetch_jwt.call_count == 2
+        # Should have called connect twice
+        assert mock_connect.call_count == 2
+
+    def test_exec_reconnects_on_expired_message(self):
+        """Test exec() reconnects when close reason contains 'expired'."""
+        config = TransportConfig(
+            dseq="123",
+            api_key="key",
+            deployment=DEPLOYMENT_FIXTURE,
+        )
+        transport = LeaseShellTransport(config)
+        transport.prepare()
+
+        with patch.object(transport, "_fetch_jwt", return_value="jwt") as mock_fetch_jwt:
+            with patch("just_akash.transport.lease_shell.connect") as mock_connect:
+                # First call: raise with reason "token expired"
+                class FakeWSExpired:
+                    def recv(self, timeout=None):
+                        raise make_close_error(1000, "token expired")
+                    def __enter__(self):
+                        return self
+                    def __exit__(self, *a):
+                        pass
+
+                # Second call: succeed with exit code 2
+                fake_ws_ok = FakeWebSocket([
+                    bytes([102]) + (2).to_bytes(4, "little"),
+                ])
+
+                mock_connect.side_effect = [FakeWSExpired(), fake_ws_ok]
+
+                exit_code = transport.exec("test")
+
+        assert exit_code == 2
+        assert mock_fetch_jwt.call_count == 2
+
+    def test_exec_raises_after_max_reconnect_attempts(self):
+        """Test exec() raises RuntimeError after MAX_RECONNECT_ATTEMPTS failures."""
+        config = TransportConfig(
+            dseq="123",
+            api_key="key",
+            deployment=DEPLOYMENT_FIXTURE,
+        )
+        transport = LeaseShellTransport(config)
+        transport.prepare()
+
+        with patch.object(transport, "_fetch_jwt", return_value="jwt") as mock_fetch_jwt:
+            with patch("just_akash.transport.lease_shell.connect") as mock_connect:
+                # All attempts fail with auth expiry
+                class FakeWSAuthExpiry:
+                    def recv(self, timeout=None):
+                        raise make_close_error(4001)
+                    def __enter__(self):
+                        return self
+                    def __exit__(self, *a):
+                        pass
+
+                mock_connect.side_effect = [FakeWSAuthExpiry() for _ in range(10)]
+
+                with pytest.raises(RuntimeError, match="Failed to re-authenticate"):
+                    transport.exec("test")
+
+        # Should have attempted exactly MAX_RECONNECT_ATTEMPTS times
+        from just_akash.transport.lease_shell import MAX_RECONNECT_ATTEMPTS
+        assert mock_fetch_jwt.call_count == MAX_RECONNECT_ATTEMPTS
+
+    def test_exec_non_auth_close_propagates(self):
+        """Test exec() propagates non-auth ConnectionClosedError without retrying."""
+        config = TransportConfig(
+            dseq="123",
+            api_key="key",
+            deployment=DEPLOYMENT_FIXTURE,
+        )
+        transport = LeaseShellTransport(config)
+        transport.prepare()
+
+        with patch.object(transport, "_fetch_jwt", return_value="jwt") as mock_fetch_jwt:
+            with patch("just_akash.transport.lease_shell.connect") as mock_connect:
+                # Abnormal close (code 1006) — should propagate, not retry
+                class FakeWSAbnormal:
+                    def recv(self, timeout=None):
+                        raise make_close_error(1006)  # Abnormal close, not auth
+                    def __enter__(self):
+                        return self
+                    def __exit__(self, *a):
+                        pass
+
+                mock_connect.return_value = FakeWSAbnormal()
+
+                with pytest.raises(ConnectionClosedError):
+                    transport.exec("test")
+
+        # Should have only called _fetch_jwt once (no retry)
+        assert mock_fetch_jwt.call_count == 1
+        # Should have only called connect once
+        assert mock_connect.call_count == 1
+
+    def test_is_auth_expiry_message(self):
+        """Test _is_auth_expiry_message() helper function."""
+        # True cases
+        assert _is_auth_expiry_message("token expired") is True
+        assert _is_auth_expiry_message("unauthorized access") is True
+        assert _is_auth_expiry_message("Token Expired") is True
+        assert _is_auth_expiry_message("UNAUTHORIZED") is True
+        assert _is_auth_expiry_message("contains token in message") is True
+
+        # False cases
+        assert _is_auth_expiry_message("connection reset") is False
+        assert _is_auth_expiry_message("timeout occurred") is False
+        assert _is_auth_expiry_message("") is False
+
+    def test_is_auth_expiry_with_close_code(self):
+        """Test _is_auth_expiry() detects close codes 4001 and 4003."""
+        # Code 4001
+        exc_4001 = make_close_error(4001)
+        assert _is_auth_expiry(exc_4001) is True
+
+        # Code 4003
+        exc_4003 = make_close_error(4003)
+        assert _is_auth_expiry(exc_4003) is True
+
+        # Code 1000 (normal) — should return False
+        exc_normal = make_close_error(1000)
+        assert _is_auth_expiry(exc_normal) is False
+
+    def test_is_auth_expiry_with_reason_string(self):
+        """Test _is_auth_expiry() detects auth keywords in reason."""
+        exc = make_close_error(1000, "token expired")
+        assert _is_auth_expiry(exc) is True
+
+        exc = make_close_error(1000, "unauthorized")
+        assert _is_auth_expiry(exc) is True
+
+        exc = make_close_error(1000, "connection reset")
+        assert _is_auth_expiry(exc) is False
