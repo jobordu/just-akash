@@ -65,6 +65,8 @@ Fastest path from "I want something running on Akash" to a live, remotely-access
 - ✓ SHLL-02: Terminal size (rows × columns) sent to remote on connect — Phase 9
 - ✓ SHLL-03: Ctrl+C forwarded to remote process (not swallowed) — Phase 9
 - ✓ SHLL-04: Terminal restored to cooked mode on all exit paths — Phase 9
+- ✓ TRNS-01: `just exec/inject/connect` uses lease-shell by default (no SSH key needed) — Phase 10
+- ✓ TRNS-03: CLI auto-falls back to SSH with stderr notice when lease-shell unavailable — Phase 10
 
 ### Out of Scope
 
@@ -98,6 +100,8 @@ Fastest path from "I want something running on Akash" to a live, remotely-access
 | Output NOT replayed on reconnect | Accumulated stdout/stderr persists; new frames resume streaming without duplication | ✓ Good |
 | `except TimeoutError` only in I/O loop (not `except Exception`) | Generic exception catch causes infinite loops in test mocks; websockets uses TimeoutError for recv timeout | ✓ Good |
 | SIGWINCH handler uses stored `_last_size` fallback | `os.get_terminal_size()` fails after session ends; fallback to last known size enables clean handler invocation | ✓ Good |
+| Transport fallback via `validate()` (not try/except) | Explicit availability check is predictable; try/except on exec() would silently swallow real runtime errors | ✓ Good |
+| Fallback notice to stderr (not stdout) | Keeps stdout clean for piped output; user sees notice without disrupting scripts | ✓ Good |
 
 ---
-*Last updated: 2026-04-19 — Phase 9 (Interactive Shell) complete*
+*Last updated: 2026-04-19 — Phase 10 (Default Transport Switch) complete*

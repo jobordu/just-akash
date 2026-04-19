@@ -5,7 +5,7 @@
 See: .planning/PROJECT.md (updated 2026-04-19)
 
 **Core value:** Fastest path from "I want something running on Akash" to a live, remotely-accessible instance — single command, no manual portal steps.
-**Current focus:** Phase 10 — Default Transport Switch and Fallback (v1.5)
+**Current focus:** Phase 11 — Test Coverage (v1.5)
 
 ## Current Position
 
@@ -62,11 +62,12 @@ None yet.
 
 ### Blockers/Concerns
 
-- Self-signed cert acceptance (Phase 7 shortcut) — cert pinning deferred to Phase 10+; review before shipping v1.5
-- Phase 10 (default transport switch + fallback) is next — switches default from SSH to lease-shell; adds fallback logic
+- Self-signed cert acceptance (Phase 7 shortcut) — cert pinning deferred, review before shipping v1.5
+- Transport fallback duplicated 3× in cli.py (cleanup report recommends extracting helper) — low urgency
+- Phase 11 (test coverage) is the final phase — E2E recipe + unit tests for transport layer
 
 ## Session Continuity
 
 Last session: 2026-04-19
-Stopped at: Phase 10-02 complete — Default Transport Switch and Fallback. Lease-shell is now default with automatic SSH fallback. All tests passing. Ready for Phase 11 (Test Coverage).
+Stopped at: Phase 10 complete — all 2 plans executed, 483 tests passing, VERIFICATION.md: passed. Ready to plan Phase 11 (Test Coverage).
 Resume file: None
