@@ -112,4 +112,4 @@ Plans:
 | 8. Secrets Injection via Lease-Shell | 1/1 | Complete | 2026-04-19 |
 | 9. Interactive Shell | 0/3 | Not started | - |
 | 10. Default Transport Switch and Fallback | 0/TBD | Complete    | 2026-04-19 |
-| 11. Test Coverage | 0/2 | Planned (2026-04-19) | - |
+| 11. Test Coverage | 1/2 | In Progress|  |
