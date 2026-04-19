@@ -5,16 +5,16 @@
 See: .planning/PROJECT.md (updated 2026-04-19)
 
 **Core value:** Fastest path from "I want something running on Akash" to a live, remotely-accessible instance — single command, no manual portal steps.
-**Current focus:** Phase 8 — Secrets Injection via Lease-Shell (v1.5)
+**Current focus:** Phase 9 — Interactive Shell (v1.5)
 
 ## Current Position
 
-Phase: 7 of 11 (Lease-Shell Exec)
-Plan: 1 of TBD in current phase (COMPLETE)
-Status: Phase 7, Plan 1 complete — ready for Plan 2
-Last activity: 2026-04-19 — Phase 7 Plan 1 (Lease-Shell Exec) executed successfully
+Phase: 8 of 11 (Secrets Injection via Lease-Shell) — COMPLETE
+Plan: 1 of 1 in phase 8 (COMPLETE)
+Status: Phase 8 complete — LeaseShellTransport.inject() implemented; 461 tests passing
+Last activity: 2026-04-19 — Phase 8 Plan 1 (inject() TDD) executed successfully
 
-Progress: [████████████████████] 4/4 plans (100%)
+Progress: [████████████████████] 5/5 plans (100%)
 
 ## Performance Metrics
 
@@ -60,11 +60,11 @@ None yet.
 
 ### Blockers/Concerns
 
-- Phase 8 (inject via lease-shell) requires reuse of exec() WebSocket infrastructure — should be straightforward
-- Self-signed cert acceptance (Phase 7 shortcut) — cert pinning deferred to Phase 8+; review before shipping v1.5
+- Self-signed cert acceptance (Phase 7 shortcut) — cert pinning deferred to Phase 9+; review before shipping v1.5
+- Phase 9 (connect/interactive TTY) is next — reuses exec() WebSocket infrastructure; adds TTY setup and signal forwarding
 
 ## Session Continuity
 
 Last session: 2026-04-19
-Stopped at: Phase 7 complete — all 2 plans executed, 450 tests passing, VERIFICATION.md: passed. Ready to plan Phase 8.
+Stopped at: Phase 8 complete — 1 plan executed, 461 tests passing, VERIFICATION.md: passed. Ready for Phase 9 (Interactive Shell).
 Resume file: None
