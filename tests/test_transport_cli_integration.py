@@ -125,13 +125,17 @@ class TestTransportFlagParsed:
         assert rc == 0
 
     def test_connect_accepts_transport_lease_shell(self, monkeypatch, capsys):
-        """connect --transport lease-shell returns exit 1 with Phase 6 stub."""
+        """Phase 9: connect --transport lease-shell is routed to LeaseShellTransport."""
         client = _mock_client()
-        with patch("just_akash.api.AkashConsoleAPI", return_value=client):
+        with patch("just_akash.api.AkashConsoleAPI", return_value=client), \
+             patch("just_akash.transport.lease_shell.LeaseShellTransport.prepare"), \
+             patch("just_akash.transport.lease_shell.LeaseShellTransport.connect") as mock_connect:
             rc = _run(monkeypatch, [
                 "just-akash", "connect", "--dseq", "99999", "--transport", "lease-shell"
             ])
-        assert rc == 1
+        # connect() was called (not NotImplementedError stub)
+        assert mock_connect.called
+        assert rc == 0
 
     def test_exec_rejects_invalid_transport(self, monkeypatch, capsys):
         """exec --transport ftp should fail (invalid choice)."""
@@ -267,10 +271,19 @@ class TestLeaseShellStubBehaviour:
         with patch.object(t, "exec", side_effect=[0, 0, 0]):
             t.inject("/tmp/x", "content")  # Must NOT raise
 
-    def test_connect_raises(self):
-        """Phase 9+: connect() still not implemented."""
-        with pytest.raises(NotImplementedError):
-            self._t_with_deployment().connect()
+    def test_connect_does_not_raise_not_implemented(self):
+        """Phase 9: connect() is implemented — NotImplementedError stub is gone."""
+        t = self._t_with_deployment()
+        # connect() now requires a real TTY; patch dependencies to avoid TTY errors in CI
+        with patch("just_akash.transport.lease_shell.LeaseShellTransport._run_interactive_session"), \
+             patch("termios.tcgetattr", return_value=[]), \
+             patch("termios.tcsetattr"), \
+             patch("tty.setraw"), \
+             patch("sys.stdin") as mock_stdin:
+            mock_stdin.isatty.return_value = True
+            mock_stdin.fileno.return_value = 0
+            # Should not raise NotImplementedError
+            t.connect()
 
     def test_validate_returns_false_without_hostUri(self):
         """validate() returns False when no hostUri."""

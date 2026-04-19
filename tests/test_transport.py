@@ -151,10 +151,23 @@ class TestLeaseShellTransportStub:
             # Should NOT raise NotImplementedError
             t.inject("/tmp/x", "content")
 
-    def test_connect_raises_not_implemented(self):
-        """Phase 9+: connect() not yet implemented."""
-        with pytest.raises(NotImplementedError):
-            self._stub_with_deployment().connect()
+    def test_lease_shell_connect_opens_session(self):
+        """Phase 9: connect() is implemented — no longer raises NotImplementedError."""
+        t = self._stub_with_deployment()
+        t._ws_url = "wss://provider.example.com/lease/123/1/1/shell"
+        t._service = "web"
+
+        with patch("just_akash.transport.lease_shell.connect") as mock_ws_connect, \
+             patch("termios.tcgetattr", return_value=[]), \
+             patch("termios.tcsetattr"), \
+             patch("tty.setraw"), \
+             patch("sys.stdin") as mock_stdin, \
+             patch.object(t, "_run_interactive_session"):
+            mock_stdin.isatty.return_value = True
+            mock_stdin.fileno.return_value = 0
+            # Should not raise NotImplementedError
+            t.connect()
+        # If we get here without NotImplementedError, connect() is real
 
     def test_validate_returns_false_without_deployment(self):
         """validate() returns False when no hostUri."""

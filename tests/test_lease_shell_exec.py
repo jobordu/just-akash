@@ -577,12 +577,22 @@ class TestNotImplementedMethods:
         with patch.object(transport, "exec", side_effect=[0, 0, 0]):
             transport.inject("/tmp/file", "content")  # Must NOT raise
 
-    def test_connect_not_implemented(self):
-        """Test connect() raises NotImplementedError."""
+    def test_connect_does_not_raise_not_implemented(self):
+        """Phase 9: connect() is implemented — NotImplementedError stub is gone."""
+        from unittest.mock import patch as _patch
         config = TransportConfig(dseq="123", api_key="key")
         transport = LeaseShellTransport(config)
-
-        with pytest.raises(NotImplementedError, match="connect.*Phase 9"):
+        transport._ws_url = "wss://provider.example.com/lease/123/1/1/shell"
+        transport._service = "web"
+        # connect() requires TTY; patch dependencies to avoid TTY errors in CI
+        with _patch("just_akash.transport.lease_shell.LeaseShellTransport._run_interactive_session"), \
+             _patch("termios.tcgetattr", return_value=[]), \
+             _patch("termios.tcsetattr"), \
+             _patch("tty.setraw"), \
+             _patch("sys.stdin") as mock_stdin:
+            mock_stdin.isatty.return_value = True
+            mock_stdin.fileno.return_value = 0
+            # Should not raise NotImplementedError
             transport.connect()
 
 
