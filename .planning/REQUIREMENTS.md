@@ -66,29 +66,29 @@
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| TRNS-01 | — | Pending |
-| TRNS-02 | — | Pending |
-| TRNS-03 | — | Pending |
-| LSHL-01 | — | Pending |
-| LSHL-02 | — | Pending |
-| LSHL-03 | — | Pending |
-| EXEC-01 | — | Pending |
-| EXEC-02 | — | Pending |
-| EXEC-03 | — | Pending |
-| INJS-01 | — | Pending |
-| INJS-02 | — | Pending |
-| SHLL-01 | — | Pending |
-| SHLL-02 | — | Pending |
-| SHLL-03 | — | Pending |
-| SHLL-04 | — | Pending |
-| TEST-01 | — | Pending |
-| TEST-02 | — | Pending |
+| TRNS-01 | Phase 10 | Pending |
+| TRNS-02 | Phase 6 | Pending |
+| TRNS-03 | Phase 10 | Pending |
+| LSHL-01 | Phase 6 | Pending |
+| LSHL-02 | Phase 7 | Pending |
+| LSHL-03 | Phase 7 | Pending |
+| EXEC-01 | Phase 7 | Pending |
+| EXEC-02 | Phase 7 | Pending |
+| EXEC-03 | Phase 7 | Pending |
+| INJS-01 | Phase 8 | Pending |
+| INJS-02 | Phase 8 | Pending |
+| SHLL-01 | Phase 9 | Pending |
+| SHLL-02 | Phase 9 | Pending |
+| SHLL-03 | Phase 9 | Pending |
+| SHLL-04 | Phase 9 | Pending |
+| TEST-01 | Phase 11 | Pending |
+| TEST-02 | Phase 11 | Pending |
 
 **Coverage:**
 - v1.5 requirements: 17 total
-- Mapped to phases: 0
-- Unmapped: 17 ⚠️ (roadmap pending)
+- Mapped to phases: 17
+- Unmapped: 0 ✓
 
 ---
 *Requirements defined: 2026-04-18*
-*Last updated: 2026-04-18 after initial definition*
+*Last updated: 2026-04-18 — traceability mapped to phases 6-11*
