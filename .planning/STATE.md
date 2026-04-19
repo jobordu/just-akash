@@ -5,16 +5,16 @@
 See: .planning/PROJECT.md (updated 2026-04-19)
 
 **Core value:** Fastest path from "I want something running on Akash" to a live, remotely-accessible instance — single command, no manual portal steps.
-**Current focus:** Phase 11 — Test Coverage (v1.5) — PLANNED, ready to execute
+**Current focus:** v1.5 milestone complete — ready for /nf:complete-milestone
 
 ## Current Position
 
-Phase: 11 of 11 (Test Coverage) — IN PROGRESS
-Plan: 1 of 2 in phase 11
-Status: Plan 11-01 complete — test_transport_errors.py (8 tests), ready for 11-02
-Last activity: 2026-04-19 — Plan 11-01 executed: 8 transport error tests added (491 total, all green)
+Phase: 11 of 11 (Test Coverage) — COMPLETE
+Plan: 2 of 2 in phase 11 — COMPLETE
+Status: Phase 11 verified — all must-haves satisfied (16/16)
+Last activity: 2026-04-19 — Phase 11 verification passed: 491 tests, TEST-01 and TEST-02 satisfied
 
-Progress: [████████████████████] 10/10 plans in phases 6-10 (100%) + Phase 11 planned
+Progress: [████████████████████] 11/11 phases complete (100%)
 
 ## Performance Metrics
 
@@ -73,5 +73,5 @@ None.
 ## Session Continuity
 
 Last session: 2026-04-19
-Stopped at: Phase 11 plans written — 11-01-PLAN.md (TEST-02 unit tests, Wave 1) and 11-02-PLAN.md (TEST-01 E2E orchestrator + Justfile recipe, Wave 1). Both plans are Wave 1 and can execute in parallel.
+Stopped at: Milestone v1.5 audit: passed (17/17 requirements). Report: .planning/milestones/v1.5-MILESTONE-AUDIT.md. Ready for /nf:complete-milestone.
 Resume file: None
