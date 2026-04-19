@@ -2,10 +2,10 @@
 
 ## Project Reference
 
-See: .planning/PROJECT.md (updated 2026-04-18)
+See: .planning/PROJECT.md (updated 2026-04-19)
 
 **Core value:** Fastest path from "I want something running on Akash" to a live, remotely-accessible instance — single command, no manual portal steps.
-**Current focus:** Phase 6 — Transport Abstraction Foundation (v1.5)
+**Current focus:** Phase 8 — Secrets Injection via Lease-Shell (v1.5)
 
 ## Current Position
 
@@ -14,7 +14,7 @@ Plan: 1 of TBD in current phase (COMPLETE)
 Status: Phase 7, Plan 1 complete — ready for Plan 2
 Last activity: 2026-04-19 — Phase 7 Plan 1 (Lease-Shell Exec) executed successfully
 
-Progress: [▓▓░░░░░░░░] 18%
+Progress: [████████████████████] 4/4 plans (100%)
 
 ## Performance Metrics
 
@@ -60,11 +60,11 @@ None yet.
 
 ### Blockers/Concerns
 
-- Phase 7 is blocked until Phase 6 protocol discovery confirms: WebSocket endpoint URL, auth header format, message frame schema
-- Akash-specific token TTL unknown — needs validation during Phase 7 research
+- Phase 8 (inject via lease-shell) requires reuse of exec() WebSocket infrastructure — should be straightforward
+- Self-signed cert acceptance (Phase 7 shortcut) — cert pinning deferred to Phase 8+; review before shipping v1.5
 
 ## Session Continuity
 
 Last session: 2026-04-19
-Stopped at: Phase 7 Plan 1 (Lease-Shell Exec) complete — 2 tasks executed, 443 tests passing (34 new)
+Stopped at: Phase 7 complete — all 2 plans executed, 450 tests passing, VERIFICATION.md: passed. Ready to plan Phase 8.
 Resume file: None

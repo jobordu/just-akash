@@ -54,6 +54,14 @@ Fastest path from "I want something running on Akash" to a live, remotely-access
 - [ ] Secrets injection via lease-shell (no SSH dependency)
 - [ ] Test coverage for lease-shell transport
 
+### Validated (v1.5)
+
+- ✓ LSHL-02: Lease-shell authenticates using AKASH_API_KEY (no SSH key needed) — Phase 7
+- ✓ LSHL-03: Token expiry during long sessions triggers automatic re-authentication — Phase 7
+- ✓ EXEC-01: `just exec CMD` runs command on remote container over WebSocket — Phase 7
+- ✓ EXEC-02: Remote command exit code propagated as CLI exit code — Phase 7
+- ✓ EXEC-03: Remote stdout and stderr streamed to local output in real time — Phase 7
+
 ### Out of Scope
 
 <!-- Defined per milestone -->
@@ -79,6 +87,11 @@ Fastest path from "I want something running on Akash" to a live, remotely-access
 | Console API over direct chain | Simpler, no wallet/key management needed | ✓ Good |
 | SSH-based shell access | Works with any provider, no special protocol | ✓ Good |
 | `uv` as package manager | Fast, modern, handles virtualenvs cleanly | ✓ Good |
+| Synchronous `websockets.sync.client` for exec | Transport.exec() is synchronous; asyncio incompatible with existing v1.4 SSH behavior | ✓ Good |
+| Self-signed cert acceptance (Phase 7) | Provider certs are self-signed; cert pinning deferred to Phase 8 | Phase 8 to revisit |
+| JWT TTL request 3600s, accept 30s cap | Server may ignore TTL; token-refresh handles the expiry transparently | ✓ Good |
+| Token-expiry detection via close codes 4001/4003 + keyword matching | Covers both protocol-spec close codes and free-text reason strings from providers | ✓ Good |
+| Output NOT replayed on reconnect | Accumulated stdout/stderr persists; new frames resume streaming without duplication | ✓ Good |
 
 ---
-*Last updated: 2026-04-18 — Milestone v1.5 started*
+*Last updated: 2026-04-19 — Phase 7 (Lease-Shell Exec) complete*
