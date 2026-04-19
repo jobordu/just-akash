@@ -23,6 +23,33 @@ from just_akash.api import AkashConsoleAPI
 from .base import Transport, TransportConfig
 
 
+# ------------------------------------------------------------------
+# Module-level constants and helpers
+# ------------------------------------------------------------------
+
+MAX_RECONNECT_ATTEMPTS = 3
+
+
+def _is_auth_expiry_message(msg: str) -> bool:
+    """Return True if message text indicates auth expiry."""
+    lower = msg.lower()
+    return "expired" in lower or "unauthorized" in lower or "token" in lower
+
+
+def _is_auth_expiry(exc: ConnectionClosedError) -> bool:
+    """Return True if close event indicates JWT expiry or auth failure."""
+    rcvd = getattr(exc, "rcvd", None)
+    if rcvd is not None:
+        code = getattr(rcvd, "code", None)
+        if code in (4001, 4003):
+            return True
+        reason = getattr(rcvd, "reason", "") or ""
+        if _is_auth_expiry_message(reason):
+            return True
+    # Fallback: check exception string representation
+    return _is_auth_expiry_message(str(exc))
+
+
 class LeaseShellTransport(Transport):
     """
     WebSocket-based lease-shell transport.
@@ -144,6 +171,65 @@ class LeaseShellTransport(Transport):
             raise RuntimeError(f"Provider error: {msg}")
         return None
 
+    def _exec_with_refresh(self, command: str) -> int:
+        """Execute command with automatic JWT refresh on token expiry.
+
+        On ConnectionClosedError with auth close code (4001/4003) or 'expired'/'unauthorized'
+        in reason, fetches a new JWT and reopens the connection. Repeats up to
+        MAX_RECONNECT_ATTEMPTS times. Accumulated stdout/stderr already written
+        to sys.stdout.buffer/sys.stderr.buffer — nothing is replayed.
+
+        Returns the remote command exit code or raises RuntimeError if reconnection fails.
+        """
+        attempts = 0
+        exit_code = 0
+
+        while attempts < MAX_RECONNECT_ATTEMPTS:
+            jwt = self._fetch_jwt()
+            params = urllib.parse.urlencode({
+                "cmd": command,
+                "service": self._service,
+                "tty": "false",
+                "stdin": "false",
+            })
+            url = f"{self._ws_url}?{params}"
+            headers = {"Authorization": f"Bearer {jwt}"}
+            ssl_ctx = self._make_ssl_context()
+
+            try:
+                with connect(
+                    url,
+                    additional_headers=headers,
+                    ssl=ssl_ctx,
+                    compression=None,
+                    open_timeout=30,
+                    ping_interval=20,
+                    ping_timeout=20,
+                ) as ws:
+                    while True:
+                        try:
+                            frame = ws.recv(timeout=300)
+                        except ConnectionClosedOK:
+                            return exit_code
+                        except ConnectionClosedError as exc:
+                            if _is_auth_expiry(exc):
+                                break  # retry outer loop
+                            raise  # non-auth close: propagate
+                        result = self._dispatch_frame(frame)
+                        if result is not None:
+                            return result  # exit code received: done
+            except RuntimeError as exc:
+                if _is_auth_expiry_message(str(exc)):
+                    pass  # fall through to retry
+                else:
+                    raise
+            attempts += 1
+
+        raise RuntimeError(
+            f"Failed to re-authenticate after {MAX_RECONNECT_ATTEMPTS} attempts. "
+            "Check that AKASH_API_KEY is valid and the deployment is active."
+        )
+
     # ------------------------------------------------------------------
     # Transport interface
     # ------------------------------------------------------------------
@@ -165,44 +251,18 @@ class LeaseShellTransport(Transport):
         Connects with a JWT bearer token, dispatches frames until result (102)
         or close event, then returns the remote exit code.
 
+        If the provider closes due to JWT expiry (close codes 4001/4003 or reason
+        containing 'expired'/'unauthorized'), automatically fetches a fresh token
+        and retries the connection. Output already streamed to stdout/stderr is
+        not replayed.
+
         Uses websockets.sync.client (NOT asyncio) — Transport.exec() is synchronous.
         compression=None: disable permessage-deflate (provider compatibility).
         """
         if self._ws_url is None or self._service is None:
             self.prepare()
 
-        jwt = self._fetch_jwt()
-        params = urllib.parse.urlencode({
-            "cmd": command,
-            "service": self._service,
-            "tty": "false",
-            "stdin": "false",
-        })
-        url = f"{self._ws_url}?{params}"
-
-        ssl_ctx = self._make_ssl_context()
-        headers = {"Authorization": f"Bearer {jwt}"}
-
-        exit_code = 0
-        with connect(
-            url,
-            additional_headers=headers,
-            ssl=ssl_ctx,
-            compression=None,          # disable deflate for provider compat
-            open_timeout=30,
-            ping_interval=20,
-            ping_timeout=20,
-        ) as ws:
-            while True:
-                try:
-                    frame = ws.recv(timeout=300)  # 5-minute max per command
-                except (ConnectionClosedOK, ConnectionClosedError):
-                    break
-                result = self._dispatch_frame(frame)
-                if result is not None:
-                    exit_code = result
-                    break
-        return exit_code
+        return self._exec_with_refresh(command)
 
     def inject(self, remote_path: str, content: str) -> None:
         raise NotImplementedError(
