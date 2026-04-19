@@ -73,7 +73,10 @@ Phases 1-5 delivered secrets injection via SSH, remote exec, SDL env injection, 
   2. The remote session receives the correct terminal dimensions (rows and columns) on connect
   3. Pressing Ctrl+C inside the shell forwards the interrupt to the remote process rather than terminating the local CLI
   4. After the session ends — whether by normal exit, crash, signal, or network disconnect — the local terminal is fully restored to cooked mode and usable without running `reset`
-**Plans**: TBD
+**Plans**: 3 plans
+- [ ] 09-01-PLAN.md — Wave 0 test scaffolding: tests/test_interactive_shell.py (12 failing stubs covering SHLL-01 through SHLL-04)
+- [ ] 09-02-PLAN.md — LeaseShellTransport.connect() implementation: TTY raw mode, WebSocket open with tty=true+stdin=true, bidirectional I/O, SIGINT/SIGWINCH forwarding, terminal restore guarantee
+- [ ] 09-03-PLAN.md — Update existing tests: replace NotImplementedError assertions with Phase 9 positive tests; full suite green
 
 ### Phase 10: Default Transport Switch and Fallback
 **Goal**: Lease-shell is the default transport for all shell-dependent commands; SSH remains available via flag; the CLI falls back gracefully when lease-shell is not available
@@ -101,6 +104,6 @@ Phases 1-5 delivered secrets injection via SSH, remote exec, SDL env injection, 
 | 6. Transport Abstraction Foundation | 1/2 | In progress | 06-01 ✓ (2026-04-19) |
 | 7. Lease-Shell Exec | 0/2 | Not started | - |
 | 8. Secrets Injection via Lease-Shell | 1/1 | Complete | 2026-04-19 |
-| 9. Interactive Shell | 0/TBD | Not started | - |
+| 9. Interactive Shell | 0/3 | Not started | - |
 | 10. Default Transport Switch and Fallback | 0/TBD | Not started | - |
 | 11. Test Coverage | 0/TBD | Not started | - |
