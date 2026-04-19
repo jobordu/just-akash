@@ -9,25 +9,26 @@ See: .planning/PROJECT.md (updated 2026-04-18)
 
 ## Current Position
 
-Phase: 6 of 11 (Transport Abstraction Foundation)
+Phase: 7 of 11 (Lease-Shell Exec)
 Plan: 1 of TBD in current phase (COMPLETE)
-Status: Phase 6, Plan 1 complete — ready for Plan 2
-Last activity: 2026-04-19 — Phase 6 Plan 1 (Transport Abstraction) executed successfully
+Status: Phase 7, Plan 1 complete — ready for Plan 2
+Last activity: 2026-04-19 — Phase 7 Plan 1 (Lease-Shell Exec) executed successfully
 
-Progress: [▓░░░░░░░░░] 9%
+Progress: [▓▓░░░░░░░░] 18%
 
 ## Performance Metrics
 
 **Velocity:**
-- Total plans completed: 1
-- Average duration: 2.0 minutes
-- Total execution time: 0.033 hours
+- Total plans completed: 2
+- Average duration: 3.0 minutes
+- Total execution time: 0.1 hours
 
 **By Phase:**
 
 | Phase | Plans | Total | Avg/Plan |
 |-------|-------|-------|----------|
-| 6 | 1 | 2.0 min | 2.0 min | |
+| 6 | 1 | 2.0 min | 2.0 min |
+| 7 | 1 | 4.0 min | 4.0 min |
 
 **Recent Trend:**
 - Last 5 plans: —
@@ -46,6 +47,9 @@ Progress: [▓░░░░░░░░░] 9%
 - **[06-01] Transport abstraction uses ABC pattern with factory function** — decouples CLI from transport selection
 - **[06-01] SSHTransport delegates to api.py helpers** — zero behavior change, ensures parity with v1.4
 - **[06-01] LeaseShellTransport is stub** — full implementation deferred to Phase 7 after protocol discovery
+- **[07-01] Synchronous websockets client (websockets.sync.client)** — exec() is synchronous; no asyncio
+- **[07-01] Self-signed cert acceptance in Phase 7** — custom SSL context; validation deferred to Phase 8
+- **[07-01] JWT TTL fallback logic** — request 3600s but accept server cap (30s); Phase 8 handles refresh
 
 ### Pending Todos
 
@@ -59,5 +63,5 @@ None yet.
 ## Session Continuity
 
 Last session: 2026-04-19
-Stopped at: Phase 6 Plan 1 (Transport Abstraction) complete — 3 tasks executed, 373 tests passing
+Stopped at: Phase 7 Plan 1 (Lease-Shell Exec) complete — 2 tasks executed, 443 tests passing (34 new)
 Resume file: None
