@@ -24,7 +24,7 @@ import sys
 NO_SSH_MSG = (
     "No SSH port found on this deployment.\n"
     "\n"
-    "To use connect, exec, or inject, your SDL must:\n"
+    "To use connect, exec, or inject via SSH, your SDL must:\n"
     "  1. Expose port 22 (SSH)\n"
     "  2. Include SSH_PUBKEY_B64 in the env block\n"
     "  3. Run sshd in the container entrypoint\n"
@@ -32,8 +32,7 @@ NO_SSH_MSG = (
     "Use the SSH-enabled SDL:  just-akash deploy --sdl sdl/cpu-backtest-ssh.yaml\n"
     'Or set SSH_PUBKEY in .env: SSH_PUBKEY="ssh-ed25519 AAAA... your-key"\n'
     "\n"
-    "The Akash Console API does not support lease-shell.\n"
-    "SSH is the only way to connect, exec, or inject secrets."
+    "Alternatively, use lease-shell transport (default in v1.5): no SSH required."
 )
 
 
@@ -118,36 +117,36 @@ def main():
 
     # ── connect ────────────────────────────────────────
     connect_p = subparsers.add_parser(
-        "connect", help="SSH into a running deployment (requires SSH in SDL)"
+        "connect", help="Open interactive shell on a running deployment"
     )
     connect_p.add_argument("--dseq", default="")
     connect_p.add_argument("--key", default="")
     connect_p.add_argument(
         "--transport",
         choices=["ssh", "lease-shell"],
-        default="ssh",
+        default="lease-shell",
         dest="transport",
-        help="Transport to use: 'ssh' (default) or 'lease-shell' (available in v1.5)",
+        help="Transport to use: 'lease-shell' (default) or 'ssh'",
     )
 
     # ── exec ───────────────────────────────────────────
     exec_p = subparsers.add_parser(
-        "exec", help="Execute a command on a running deployment (requires SSH in SDL)"
+        "exec", help="Execute a command on a running deployment"
     )
     exec_p.add_argument("--dseq", default="")
     exec_p.add_argument("--key", default="")
     exec_p.add_argument(
         "--transport",
         choices=["ssh", "lease-shell"],
-        default="ssh",
+        default="lease-shell",
         dest="transport",
-        help="Transport to use: 'ssh' (default) or 'lease-shell' (available in v1.5)",
+        help="Transport to use: 'lease-shell' (default) or 'ssh'",
     )
     exec_p.add_argument("remote_cmd", help="Command to execute remotely")
 
     # ── inject ─────────────────────────────────────────
     inject_p = subparsers.add_parser(
-        "inject", help="Inject secrets into a running deployment via SSH (requires SSH in SDL)"
+        "inject", help="Inject secrets into a running deployment"
     )
     inject_p.add_argument("--dseq", default="")
     inject_p.add_argument("--key", default="")
@@ -173,9 +172,9 @@ def main():
     inject_p.add_argument(
         "--transport",
         choices=["ssh", "lease-shell"],
-        default="ssh",
+        default="lease-shell",
         dest="transport",
-        help="Transport to use: 'ssh' (default) or 'lease-shell' (available in v1.5)",
+        help="Transport to use: 'lease-shell' (default) or 'ssh'",
     )
 
     # ── list ───────────────────────────────────────────
@@ -243,9 +242,10 @@ def main():
 
         try:
             client = AkashConsoleAPI(_require_api_key())
-            if args.transport == "lease-shell":
+            dseq = _resolve_deployment(client, args.dseq)
+            use_lease_shell = args.transport == "lease-shell"
+            if use_lease_shell:
                 from .transport import make_transport
-                dseq = _resolve_deployment(client, args.dseq)
                 deployment = client.get_deployment(dseq)
                 transport = make_transport(
                     "lease-shell",
@@ -253,11 +253,17 @@ def main():
                     api_key=client.api_key,
                     deployment=deployment,
                 )
-                transport.prepare()  # raises NotImplementedError in Phase 6
+                if not transport.validate():
+                    print(
+                        "Notice: lease-shell transport is not available for this deployment "
+                        "(no active lease or provider hostUri missing). Falling back to SSH.",
+                        file=sys.stderr,
+                    )
+                    use_lease_shell = False
+            if use_lease_shell:
+                transport.prepare()
                 transport.connect()
             else:
-                # Default: SSH (v1.4 behavior)
-                dseq = _resolve_deployment(client, args.dseq)
                 ssh, ssh_cmd = _require_ssh(client, dseq, args.key)
                 print(f"Connecting to {ssh['host']}:{ssh['port']}...")
                 os.execvp("ssh", ssh_cmd)
@@ -271,9 +277,10 @@ def main():
 
         try:
             client = AkashConsoleAPI(_require_api_key())
-            if args.transport == "lease-shell":
+            dseq = _resolve_deployment(client, args.dseq)
+            use_lease_shell = args.transport == "lease-shell"
+            if use_lease_shell:
                 from .transport import make_transport
-                dseq = _resolve_deployment(client, args.dseq)
                 deployment = client.get_deployment(dseq)
                 transport = make_transport(
                     "lease-shell",
@@ -281,12 +288,18 @@ def main():
                     api_key=client.api_key,
                     deployment=deployment,
                 )
-                transport.prepare()  # raises NotImplementedError in Phase 6
+                if not transport.validate():
+                    print(
+                        "Notice: lease-shell transport is not available for this deployment "
+                        "(no active lease or provider hostUri missing). Falling back to SSH.",
+                        file=sys.stderr,
+                    )
+                    use_lease_shell = False
+            if use_lease_shell:
+                transport.prepare()
                 rc = transport.exec(args.remote_cmd)
                 sys.exit(rc)
             else:
-                # Default: SSH (v1.4 behavior)
-                dseq = _resolve_deployment(client, args.dseq)
                 ssh, ssh_cmd = _require_ssh(client, dseq, args.key)
                 ssh_cmd.append(args.remote_cmd)
                 print(f"Executing on {ssh['host']}:{ssh['port']}...")
@@ -327,7 +340,8 @@ def main():
                 print("Error: No secrets to inject. Use --env KEY=VALUE or --env-file PATH")
                 sys.exit(1)
 
-            if args.transport == "lease-shell":
+            use_lease_shell = args.transport == "lease-shell"
+            if use_lease_shell:
                 from .transport import make_transport
                 deployment = client.get_deployment(dseq)
                 transport = make_transport(
@@ -336,12 +350,19 @@ def main():
                     api_key=client.api_key,
                     deployment=deployment,
                 )
-                transport.prepare()  # raises NotImplementedError in Phase 6
+                if not transport.validate():
+                    print(
+                        "Notice: lease-shell transport is not available for this deployment "
+                        "(no active lease or provider hostUri missing). Falling back to SSH.",
+                        file=sys.stderr,
+                    )
+                    use_lease_shell = False
+            if use_lease_shell:
                 secrets_content = "\n".join(env_lines) + "\n"
+                transport.prepare()
                 transport.inject(args.remote_path, secrets_content)
                 print(f"Injected {len(env_lines)} secret(s) into {dseq}:{args.remote_path}")
             else:
-                # Default: SSH (v1.4 behavior)
                 ssh, ssh_cmd = _require_ssh(client, dseq, args.key)
                 remote_path = args.remote_path
                 secrets_content = "\n".join(env_lines) + "\n"

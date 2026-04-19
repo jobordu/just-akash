@@ -80,14 +80,21 @@ class TestTransportFlagParsed:
         assert rc == 0
 
     def test_exec_accepts_transport_lease_shell(self, monkeypatch, capsys):
-        """exec --transport lease-shell parses but raises NotImplementedError (Phase 6 stub)."""
-        client = _mock_client()
-        with patch("just_akash.api.AkashConsoleAPI", return_value=client):
+        """exec --transport lease-shell routes to LeaseShellTransport (Phase 7+)."""
+        lease_shell_deployment = {
+            "leases": [{
+                "provider": {"hostUri": "https://provider.example.com:8443"},
+                "status": {"services": {"web": {}}},
+            }]
+        }
+        client = _mock_client(deployment=lease_shell_deployment)
+        with patch("just_akash.api.AkashConsoleAPI", return_value=client), \
+             patch("just_akash.transport.lease_shell.LeaseShellTransport.exec", return_value=0) as mock_exec:
             rc = _run(monkeypatch, [
                 "just-akash", "exec", "--dseq", "99999", "--transport", "lease-shell", "echo hi"
             ])
-        # Phase 6 stub raises NotImplementedError → caught as RuntimeError → exit 1
-        assert rc == 1
+        assert mock_exec.called
+        assert rc == 0
 
     def test_inject_accepts_transport_ssh(self, monkeypatch, tmp_path):
         """inject --transport ssh (default) completes normally."""
