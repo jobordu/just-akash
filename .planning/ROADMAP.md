@@ -61,7 +61,8 @@ Phases 1-5 delivered secrets injection via SSH, remote exec, SDL env injection, 
 **Success Criteria** (what must be TRUE):
   1. `just inject` (or `just-akash inject`) writes secrets to the remote container without requiring SSH keys or port 22 to be open
   2. Injected secret values do not appear in SDL, deployment logs, or CLI stdout during the inject operation
-**Plans**: TBD
+**Plans**: 1 plan
+- [ ] 08-01-PLAN.md — LeaseShellTransport.inject() TDD: failing tests + implementation (mkdir, base64-cat, chmod via exec(); shlex.quote() path escaping; INJS-01 + INJS-02)
 
 ### Phase 9: Interactive Shell
 **Goal**: Users can open a full interactive TTY shell session over lease-shell; the terminal is always restored cleanly regardless of how the session ends
@@ -99,7 +100,7 @@ Phases 1-5 delivered secrets injection via SSH, remote exec, SDL env injection, 
 |-------|----------------|--------|-----------|
 | 6. Transport Abstraction Foundation | 1/2 | In progress | 06-01 ✓ (2026-04-19) |
 | 7. Lease-Shell Exec | 0/2 | Not started | - |
-| 8. Secrets Injection via Lease-Shell | 0/TBD | Not started | - |
+| 8. Secrets Injection via Lease-Shell | 0/1 | Not started | - |
 | 9. Interactive Shell | 0/TBD | Not started | - |
 | 10. Default Transport Switch and Fallback | 0/TBD | Not started | - |
 | 11. Test Coverage | 0/TBD | Not started | - |
