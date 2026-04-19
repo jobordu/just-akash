@@ -37,7 +37,7 @@ Phases 1-5 delivered secrets injection via SSH, remote exec, SDL env injection, 
   3. The lease-shell WebSocket endpoint URL, auth header format, and message frame schema are documented in a protocol note derived from console.akash.network traffic inspection
   4. `just_akash/transport/` package exists with a Transport base class, SSHTransport implementation, and LeaseShellTransport stub
 **Plans**: 2 plans
-- [ ] 06-01-PLAN.md — Transport package foundation (base.py, SSHTransport, LeaseShellTransport stub, pyproject.toml deps, Wave 0 tests)
+- [x] 06-01-PLAN.md — Transport package foundation (base.py, SSHTransport, LeaseShellTransport stub, pyproject.toml deps, Wave 0 tests) — COMPLETE 2026-04-19
 - [ ] 06-02-PLAN.md — CLI --transport flag wiring + docs/PROTOCOL.md protocol note
 
 ### Phase 7: Lease-Shell Exec
@@ -95,7 +95,7 @@ Phases 1-5 delivered secrets injection via SSH, remote exec, SDL env injection, 
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 6. Transport Abstraction Foundation | 0/TBD | Not started | - |
+| 6. Transport Abstraction Foundation | 1/2 | In progress | 06-01 ✓ (2026-04-19) |
 | 7. Lease-Shell Exec | 0/TBD | Not started | - |
 | 8. Secrets Injection via Lease-Shell | 0/TBD | Not started | - |
 | 9. Interactive Shell | 0/TBD | Not started | - |
