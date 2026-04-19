@@ -34,6 +34,15 @@ def _make_transport():
     t._provider_uri = "https://provider.us-east.akash.pub:8443"
     t._cert = None
     t._ws = None
+    # Mock API client so _fetch_jwt() works without network
+    mock_api = MagicMock()
+    mock_api.create_jwt.return_value = "test-jwt-token"
+    t._api_client = mock_api
+    # Minimal config so _fetch_jwt doesn't error
+    mock_config = MagicMock()
+    mock_config.dseq = "1"
+    mock_config.api_key = "test-key"
+    t._config = mock_config
     return t
 
 
@@ -207,7 +216,7 @@ class TestLeaseShellConnect:
         captured_handler = [None]
 
         def capture_signal(sig, handler):
-            if sig == signal.SIGINT:
+            if sig == signal.SIGINT and callable(handler):
                 captured_handler[0] = handler
             return signal.SIG_DFL
 
@@ -259,7 +268,7 @@ class TestLeaseShellConnect:
         captured_handler = [None]
 
         def capture_signal(sig, handler):
-            if sig == signal.SIGWINCH:
+            if sig == signal.SIGWINCH and callable(handler):
                 captured_handler[0] = handler
             return signal.SIG_DFL
 

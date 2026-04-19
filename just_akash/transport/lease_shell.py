@@ -351,7 +351,131 @@ class LeaseShellTransport(Transport):
             termios.tcsetattr(fd, termios.TCSADRAIN, original_settings)
 
     def _run_interactive_session(self) -> None:
-        raise NotImplementedError("_run_interactive_session not yet implemented")
+        """Bidirectional I/O loop with signal forwarding and terminal resize.
+
+        Opens WebSocket with tty=true&stdin=true, sends initial terminal size,
+        installs SIGINT/SIGWINCH handlers, then multiplexes stdin<->WebSocket
+        via select() until frame 102 (exit) or connection close.
+
+        Signal handlers are restored in the finally block.
+        Non-blocking stdin is reset to blocking in the finally block.
+        """
+        # --- Build WebSocket URL with tty=true, stdin=true (SHLL-01) ---
+        jwt = self._fetch_jwt()
+        params = urllib.parse.urlencode({
+            "service": self._service,
+            "tty": "true",
+            "stdin": "true",
+        })
+        url = f"{self._ws_url}?{params}"
+        headers = {"Authorization": f"Bearer {jwt}"}
+        ssl_ctx = self._make_ssl_context()
+
+        with connect(
+            url,
+            additional_headers=headers,
+            ssl=ssl_ctx,
+            compression=None,
+            open_timeout=30,
+            ping_interval=20,
+            ping_timeout=20,
+        ) as ws:
+            self._ws = ws
+
+            # --- Send initial terminal dimensions (SHLL-02) ---
+            try:
+                size = os.get_terminal_size()
+                resize_frame = bytes([_FRAME_RESIZE]) + struct.pack(">HH", size.lines, size.columns)
+                ws.send(resize_frame)
+            except OSError:
+                pass  # Non-TTY fallback: skip initial size
+
+            # --- SIGINT handler: forward Ctrl+C to remote (SHLL-03) ---
+            def _sigint_handler(signum, frame):
+                try:
+                    ws.send(bytes([_FRAME_STDIN, 0x03]))
+                except Exception:
+                    pass  # WebSocket closed: allow exit
+
+            # --- SIGWINCH handler: forward terminal resize ---
+            try:
+                _initial_size = os.get_terminal_size()
+            except OSError:
+                _initial_size = None
+            _last_size = [_initial_size]
+
+            def _sigwinch_handler(signum, frame):
+                try:
+                    new_size = os.get_terminal_size()
+                except OSError:
+                    # No terminal available (e.g., after session ends or in CI)
+                    # Fall back to last known size if we haven't sent it yet
+                    new_size = _last_size[0]
+                if new_size is not None:
+                    try:
+                        ws.send(bytes([_FRAME_RESIZE]) + struct.pack(">HH", new_size.lines, new_size.columns))
+                        _last_size[0] = new_size
+                    except Exception:
+                        pass
+
+            original_sigint = signal.signal(signal.SIGINT, _sigint_handler)
+            original_sigwinch = signal.signal(signal.SIGWINCH, _sigwinch_handler)
+
+            fd_stdin = sys.stdin.fileno()
+            orig_flags = fcntl.fcntl(fd_stdin, fcntl.F_GETFL)
+            fcntl.fcntl(fd_stdin, fcntl.F_SETFL, orig_flags | os.O_NONBLOCK)
+
+            try:
+                self._run_io_loop(ws)
+            finally:
+                fcntl.fcntl(fd_stdin, fcntl.F_SETFL, orig_flags)
+                signal.signal(signal.SIGINT, original_sigint)
+                signal.signal(signal.SIGWINCH, original_sigwinch)
+                self._ws = None
+
+    def _run_io_loop(self, ws) -> None:
+        """select()-based I/O multiplexer: stdin->WebSocket and WebSocket->stdout/stderr.
+
+        Runs until frame 102 (exit result) is received or the connection closes.
+        Uses select() with 1-second timeout to interleave stdin reads with WebSocket polls.
+        """
+        fd_stdin = sys.stdin.fileno()
+
+        while True:
+            # Multiplex: wait up to 1s for stdin activity
+            readable, _, _ = select.select([fd_stdin], [], [], 1.0)
+
+            # stdin -> frame 104 (stdin to remote)
+            if fd_stdin in readable:
+                try:
+                    chunk = os.read(fd_stdin, 4096)
+                    if chunk:
+                        ws.send(bytes([_FRAME_STDIN]) + chunk)
+                except (OSError, BlockingIOError):
+                    pass
+
+            # WebSocket -> stdout/stderr
+            try:
+                raw = ws.recv(timeout=0.05)
+                if isinstance(raw, bytes) and len(raw) >= 1:
+                    code = raw[0]
+                    payload = raw[1:]
+                    if code == _FRAME_STDOUT:
+                        sys.stdout.buffer.write(payload)
+                        sys.stdout.buffer.flush()
+                    elif code == _FRAME_STDERR:
+                        sys.stderr.buffer.write(payload)
+                        sys.stderr.buffer.flush()
+                    elif code == _FRAME_RESULT:
+                        return  # Session complete (exit code received)
+                    elif code == _FRAME_FAILURE:
+                        raise RuntimeError(
+                            f"Provider error: {payload.decode('utf-8', errors='replace')}"
+                        )
+            except (ConnectionClosedOK, ConnectionClosedError):
+                return  # Normal or error close
+            except TimeoutError:
+                pass  # recv timeout: loop continues polling stdin
 
     def validate(self) -> bool:
         """Return True if deployment has an active lease with a provider hostUri."""
