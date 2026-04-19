@@ -122,6 +122,13 @@ def main():
     )
     connect_p.add_argument("--dseq", default="")
     connect_p.add_argument("--key", default="")
+    connect_p.add_argument(
+        "--transport",
+        choices=["ssh", "lease-shell"],
+        default="ssh",
+        dest="transport",
+        help="Transport to use: 'ssh' (default) or 'lease-shell' (available in v1.5)",
+    )
 
     # ── exec ───────────────────────────────────────────
     exec_p = subparsers.add_parser(
@@ -129,6 +136,13 @@ def main():
     )
     exec_p.add_argument("--dseq", default="")
     exec_p.add_argument("--key", default="")
+    exec_p.add_argument(
+        "--transport",
+        choices=["ssh", "lease-shell"],
+        default="ssh",
+        dest="transport",
+        help="Transport to use: 'ssh' (default) or 'lease-shell' (available in v1.5)",
+    )
     exec_p.add_argument("remote_cmd", help="Command to execute remotely")
 
     # ── inject ─────────────────────────────────────────
@@ -155,6 +169,13 @@ def main():
         dest="remote_path",
         default="/run/secrets/.env",
         help="Remote path to write secrets (default: /run/secrets/.env)",
+    )
+    inject_p.add_argument(
+        "--transport",
+        choices=["ssh", "lease-shell"],
+        default="ssh",
+        dest="transport",
+        help="Transport to use: 'ssh' (default) or 'lease-shell' (available in v1.5)",
     )
 
     # ── list ───────────────────────────────────────────
@@ -222,10 +243,24 @@ def main():
 
         try:
             client = AkashConsoleAPI(_require_api_key())
-            dseq = _resolve_deployment(client, args.dseq)
-            ssh, ssh_cmd = _require_ssh(client, dseq, args.key)
-            print(f"Connecting to {ssh['host']}:{ssh['port']}...")
-            os.execvp("ssh", ssh_cmd)
+            if args.transport == "lease-shell":
+                from .transport import make_transport
+                dseq = _resolve_deployment(client, args.dseq)
+                deployment = client.get_deployment(dseq)
+                transport = make_transport(
+                    "lease-shell",
+                    dseq=dseq,
+                    api_key=client.api_key,
+                    deployment=deployment,
+                )
+                transport.prepare()  # raises NotImplementedError in Phase 6
+                transport.connect()
+            else:
+                # Default: SSH (v1.4 behavior)
+                dseq = _resolve_deployment(client, args.dseq)
+                ssh, ssh_cmd = _require_ssh(client, dseq, args.key)
+                print(f"Connecting to {ssh['host']}:{ssh['port']}...")
+                os.execvp("ssh", ssh_cmd)
         except RuntimeError as e:
             print(f"Error: {e}", file=sys.stderr)
             sys.exit(1)
@@ -236,12 +271,27 @@ def main():
 
         try:
             client = AkashConsoleAPI(_require_api_key())
-            dseq = _resolve_deployment(client, args.dseq)
-            ssh, ssh_cmd = _require_ssh(client, dseq, args.key)
-            ssh_cmd.append(args.remote_cmd)
-            print(f"Executing on {ssh['host']}:{ssh['port']}...")
-            result = subprocess.run(ssh_cmd, text=True)
-            sys.exit(result.returncode)
+            if args.transport == "lease-shell":
+                from .transport import make_transport
+                dseq = _resolve_deployment(client, args.dseq)
+                deployment = client.get_deployment(dseq)
+                transport = make_transport(
+                    "lease-shell",
+                    dseq=dseq,
+                    api_key=client.api_key,
+                    deployment=deployment,
+                )
+                transport.prepare()  # raises NotImplementedError in Phase 6
+                rc = transport.exec(args.remote_cmd)
+                sys.exit(rc)
+            else:
+                # Default: SSH (v1.4 behavior)
+                dseq = _resolve_deployment(client, args.dseq)
+                ssh, ssh_cmd = _require_ssh(client, dseq, args.key)
+                ssh_cmd.append(args.remote_cmd)
+                print(f"Executing on {ssh['host']}:{ssh['port']}...")
+                result = subprocess.run(ssh_cmd, text=True)
+                sys.exit(result.returncode)
         except RuntimeError as e:
             print(f"Error: {e}", file=sys.stderr)
             sys.exit(1)
@@ -277,28 +327,43 @@ def main():
                 print("Error: No secrets to inject. Use --env KEY=VALUE or --env-file PATH")
                 sys.exit(1)
 
-            ssh, ssh_cmd = _require_ssh(client, dseq, args.key)
-            remote_path = args.remote_path
-            secrets_content = "\n".join(env_lines) + "\n"
+            if args.transport == "lease-shell":
+                from .transport import make_transport
+                deployment = client.get_deployment(dseq)
+                transport = make_transport(
+                    "lease-shell",
+                    dseq=dseq,
+                    api_key=client.api_key,
+                    deployment=deployment,
+                )
+                transport.prepare()  # raises NotImplementedError in Phase 6
+                secrets_content = "\n".join(env_lines) + "\n"
+                transport.inject(args.remote_path, secrets_content)
+                print(f"Injected {len(env_lines)} secret(s) into {dseq}:{args.remote_path}")
+            else:
+                # Default: SSH (v1.4 behavior)
+                ssh, ssh_cmd = _require_ssh(client, dseq, args.key)
+                remote_path = args.remote_path
+                secrets_content = "\n".join(env_lines) + "\n"
 
-            mkdir_cmd = ssh_cmd + [f"mkdir -p $(dirname {remote_path})"]
-            result = subprocess.run(mkdir_cmd, capture_output=True, text=True)
-            if result.returncode != 0:
-                print(f"Error creating remote directory: {result.stderr.strip()}")
-                sys.exit(1)
+                mkdir_cmd = ssh_cmd + [f"mkdir -p $(dirname {remote_path})"]
+                result = subprocess.run(mkdir_cmd, capture_output=True, text=True)
+                if result.returncode != 0:
+                    print(f"Error creating remote directory: {result.stderr.strip()}")
+                    sys.exit(1)
 
-            write_cmd = ssh_cmd + [f"cat > {remote_path}"]
-            result = subprocess.run(
-                write_cmd, input=secrets_content, capture_output=True, text=True
-            )
-            if result.returncode != 0:
-                print(f"Error writing secrets: {result.stderr.strip()}")
-                sys.exit(1)
+                write_cmd = ssh_cmd + [f"cat > {remote_path}"]
+                result = subprocess.run(
+                    write_cmd, input=secrets_content, capture_output=True, text=True
+                )
+                if result.returncode != 0:
+                    print(f"Error writing secrets: {result.stderr.strip()}")
+                    sys.exit(1)
 
-            chmod_cmd = ssh_cmd + [f"chmod 600 {remote_path}"]
-            subprocess.run(chmod_cmd, capture_output=True, text=True)
+                chmod_cmd = ssh_cmd + [f"chmod 600 {remote_path}"]
+                subprocess.run(chmod_cmd, capture_output=True, text=True)
 
-            print(f"Injected {len(env_lines)} secret(s) into {dseq}:{remote_path}")
+                print(f"Injected {len(env_lines)} secret(s) into {dseq}:{remote_path}")
         except RuntimeError as e:
             print(f"Error: {e}", file=sys.stderr)
             sys.exit(1)
