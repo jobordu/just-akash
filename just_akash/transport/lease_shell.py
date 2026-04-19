@@ -9,7 +9,9 @@ Protocol reference: docs/PROTOCOL.md
 
 from __future__ import annotations
 
+import base64
 import json
+import shlex
 import ssl
 import sys
 import urllib.parse
@@ -265,10 +267,42 @@ class LeaseShellTransport(Transport):
         return self._exec_with_refresh(command)
 
     def inject(self, remote_path: str, content: str) -> None:
-        raise NotImplementedError(
-            "LeaseShellTransport.inject() not yet implemented. "
-            "Available in Phase 8. Use --transport ssh for now."
+        """Write content to remote_path on the container via three exec() calls.
+
+        Uses base64 encoding to safely transmit any UTF-8 content (handles
+        newlines, quotes, backslashes without shell escaping issues).
+        Path is shell-quoted via shlex.quote() to prevent injection.
+
+        Secret values are never written to CLI stdout: the echo | base64 -d > path
+        command redirects output into the file; the terminal receives nothing.
+        """
+        if self._ws_url is None or self._service is None:
+            self.prepare()
+
+        # Step 1: ensure parent directory exists
+        mkdir_cmd = f"mkdir -p $(dirname {shlex.quote(remote_path)})"
+        rc = self.exec(mkdir_cmd)
+        if rc != 0:
+            raise RuntimeError(
+                f"Failed to create directory for {remote_path}: exit {rc}"
+            )
+
+        # Step 2: write content via base64 decode (plain text never appears in command)
+        encoded = base64.b64encode(content.encode("utf-8")).decode("ascii")
+        write_cmd = (
+            f"echo {shlex.quote(encoded)} | base64 -d > {shlex.quote(remote_path)}"
         )
+        rc = self.exec(write_cmd)
+        if rc != 0:
+            raise RuntimeError(f"Failed to write {remote_path}: exit {rc}")
+
+        # Step 3: restrict permissions to owner-only
+        chmod_cmd = f"chmod 600 {shlex.quote(remote_path)}"
+        rc = self.exec(chmod_cmd)
+        if rc != 0:
+            raise RuntimeError(
+                f"Failed to set permissions on {remote_path}: exit {rc}"
+            )
 
     def connect(self) -> None:
         raise NotImplementedError(

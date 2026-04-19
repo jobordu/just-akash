@@ -556,15 +556,26 @@ class TestValidate:
 # --- NotImplemented Methods ---
 
 class TestNotImplementedMethods:
-    """Test that inject() and connect() raise NotImplementedError."""
+    """Test that connect() raises NotImplementedError (inject() is implemented in Phase 8)."""
 
-    def test_inject_not_implemented(self):
-        """Test inject() raises NotImplementedError."""
-        config = TransportConfig(dseq="123", api_key="key")
+    def test_inject_implemented_phase_8(self):
+        """Phase 8: inject() is now implemented — no longer raises NotImplementedError."""
+        config = TransportConfig(
+            dseq="123",
+            api_key="key",
+            deployment={
+                "leases": [{
+                    "provider": {"hostUri": "https://provider.example.com:8443"},
+                    "status": {"services": {"web": {}}},
+                }]
+            },
+        )
         transport = LeaseShellTransport(config)
-
-        with pytest.raises(NotImplementedError, match="inject.*Phase 8"):
-            transport.inject("/tmp/file", "content")
+        transport._ws_url = "wss://provider.example.com:8443/lease/123/1/1/shell"
+        transport._service = "web"
+        from unittest.mock import patch
+        with patch.object(transport, "exec", side_effect=[0, 0, 0]):
+            transport.inject("/tmp/file", "content")  # Must NOT raise
 
     def test_connect_not_implemented(self):
         """Test connect() raises NotImplementedError."""
