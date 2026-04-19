@@ -86,7 +86,10 @@ Phases 1-5 delivered secrets injection via SSH, remote exec, SDL env injection, 
   1. Running `just exec`, `just inject`, or `just connect` with no transport flag uses lease-shell by default — no SSH key or port 22 required
   2. When lease-shell is unavailable on a deployment (missing lease or unsupported provider), the CLI automatically falls back to SSH and logs a notice to the user
   3. `--transport ssh` on any shell command forces SSH transport and bypasses lease-shell entirely
-**Plans**: TBD
+**Plans**: 2 plans
+Plans:
+- [ ] 10-01-PLAN.md — Wave 0 TDD stubs: test_default_transport.py (8 RED tests for default-transport and fallback behaviors)
+- [ ] 10-02-PLAN.md — Implementation: switch argparse defaults to lease-shell, add validate()-based fallback logic, clean NO_SSH_MSG; turn all 9 tests GREEN
 
 ### Phase 11: Test Coverage
 **Goal**: The lease-shell transport has E2E validation against a real Akash deployment and isolated unit tests with a mocked WebSocket
