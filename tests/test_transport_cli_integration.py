@@ -107,20 +107,22 @@ class TestTransportFlagParsed:
         assert rc == 0
 
     def test_inject_accepts_transport_lease_shell(self, monkeypatch, capsys):
-        """inject --transport lease-shell returns exit 1 with Phase 6 stub."""
-        env_file_content = "SECRET=abc\n"
-        client = _mock_client()
+        """inject --transport lease-shell succeeds with Phase 8 implementation."""
+        lease_shell_deployment = {
+            "leases": [{
+                "provider": {"hostUri": "https://provider.example.com:8443"},
+                "status": {"services": {"web": {}}},
+            }]
+        }
+        client = _mock_client(deployment=lease_shell_deployment)
         with patch("just_akash.api.AkashConsoleAPI", return_value=client), \
-             patch("builtins.open", MagicMock(return_value=MagicMock(
-                 __enter__=MagicMock(return_value=MagicMock(
-                     read=MagicMock(return_value=env_file_content)
-                 ))
-             ))):
+             patch("just_akash.transport.lease_shell.LeaseShellTransport.exec",
+                   side_effect=[0, 0, 0]):
             rc = _run(monkeypatch, [
                 "just-akash", "inject", "--dseq", "99999",
                 "--env", "SECRET=abc", "--transport", "lease-shell"
             ])
-        assert rc == 1
+        assert rc == 0
 
     def test_connect_accepts_transport_lease_shell(self, monkeypatch, capsys):
         """connect --transport lease-shell returns exit 1 with Phase 6 stub."""
@@ -257,10 +259,13 @@ class TestLeaseShellStubBehaviour:
         with pytest.raises(RuntimeError, match="No leases found"):
             self._t_no_deployment().exec("echo hi")
 
-    def test_inject_raises(self):
-        """Phase 8+: inject() still not implemented."""
-        with pytest.raises(NotImplementedError):
-            self._t_with_deployment().inject("/tmp/x", "content")
+    def test_lease_shell_inject_implemented(self):
+        """Phase 8: inject() is implemented — no longer raises NotImplementedError."""
+        t = self._t_with_deployment()
+        t._ws_url = "wss://provider.example.com/lease/1/1/1/shell"
+        t._service = "web"
+        with patch.object(t, "exec", side_effect=[0, 0, 0]):
+            t.inject("/tmp/x", "content")  # Must NOT raise
 
     def test_connect_raises(self):
         """Phase 9+: connect() still not implemented."""

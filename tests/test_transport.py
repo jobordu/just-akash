@@ -142,10 +142,14 @@ class TestLeaseShellTransportStub:
         with pytest.raises(RuntimeError, match="No leases found"):
             self._stub_no_deployment().exec("echo hi")
 
-    def test_inject_raises_not_implemented(self):
-        """Phase 8+: inject() not yet implemented."""
-        with pytest.raises(NotImplementedError):
-            self._stub_with_deployment().inject("/tmp/x", "content")
+    def test_lease_shell_inject_not_a_stub(self):
+        """Phase 8: inject() is implemented (no longer NotImplementedError)."""
+        t = self._stub_with_deployment()
+        t._ws_url = "wss://p:8443/lease/1/1/1/shell"
+        t._service = "web"
+        with patch.object(t, "exec", side_effect=[0, 0, 0]):
+            # Should NOT raise NotImplementedError
+            t.inject("/tmp/x", "content")
 
     def test_connect_raises_not_implemented(self):
         """Phase 9+: connect() not yet implemented."""
