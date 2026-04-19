@@ -33,6 +33,7 @@ Progress: [▓▓░░░░░░░░] 18%
 **Recent Trend:**
 - Last 5 plans: —
 - Trend: —
+| Phase 07-lease-shell-exec P02 | 10 | 2 tasks | 2 files |
 
 ## Accumulated Context
 
@@ -50,6 +51,8 @@ Progress: [▓▓░░░░░░░░] 18%
 - **[07-01] Synchronous websockets client (websockets.sync.client)** — exec() is synchronous; no asyncio
 - **[07-01] Self-signed cert acceptance in Phase 7** — custom SSL context; validation deferred to Phase 8
 - **[07-01] JWT TTL fallback logic** — request 3600s but accept server cap (30s); Phase 8 handles refresh
+- [Phase 07-lease-shell-exec]: Token-expiry detection via close codes 4001/4003 + keyword matching on reason strings
+- [Phase 07-lease-shell-exec]: Output NOT replayed on reconnect; accumulated stdout/stderr persists, new frames resume streaming
 
 ### Pending Todos
 
