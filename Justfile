@@ -175,6 +175,19 @@ test-secrets:
     set -x
     uv run python -m just_akash.test_secrets_e2e
 
+# E2E lease-shell transport test: deploy → exec/inject via lease-shell → verify → cleanup
+test-shell:
+    #!/bin/bash
+    set -euo pipefail
+    mkdir -p "{{log_dir}}"
+    timestamp="$(date -u +"%Y%m%dT%H%M%SZ")"
+    log_file="{{log_dir}}/test-shell-${timestamp}.log"
+    exec > >(tee -a "$log_file") 2>&1
+    trap 'status=$?; echo "[INFO] recipe=test-shell finished_at=$(date -u +"%Y-%m-%dT%H:%M:%SZ") exit_code=${status} log_file=${log_file}"' EXIT
+    echo "[INFO] recipe=test-shell started_at=$(date -u +"%Y-%m-%dT%H:%M:%SZ") cwd=$PWD log_file=$log_file"
+    set -x
+    uv run python -m just_akash.test_shell_e2e
+
 # ── Lint & Quality ───────────────────────────────────
 
 # Run ruff lint + format check
