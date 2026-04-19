@@ -1,8 +1,8 @@
 ---
 phase: 9
 slug: interactive-shell
-status: draft
-nyquist_compliant: false
+status: approved
+nyquist_compliant: true
 wave_0_complete: false
 created: 2026-04-19
 ---
@@ -43,8 +43,12 @@ created: 2026-04-19
 
 | Task ID | Plan | Wave | Requirement | Test Type | Automated Command | File Exists | Status |
 |---------|------|------|-------------|-----------|-------------------|-------------|--------|
-| 09-01-01 | 01 | 1 | SHLL-01, SHLL-02, SHLL-03, SHLL-04 | unit | `pytest tests/test_interactive_shell.py -v` | ❌ W0 | ⬜ pending |
-| 09-01-02 | 01 | 1 | SHLL-01, SHLL-02, SHLL-03, SHLL-04 | unit | `pytest tests/test_interactive_shell.py --tb=short` | ✅ | ⬜ pending |
+| 09-01-01 | 01 | 0 | SHLL-01, SHLL-02, SHLL-03, SHLL-04 | unit (stubs) | `pytest tests/test_interactive_shell.py --tb=short -q` | ❌ W0 (created in task) | ⬜ pending |
+| 09-02-01 | 02 | 1 | SHLL-01, SHLL-04 | unit | `pytest tests/test_interactive_shell.py -k "tty or restore" -v` | ✅ after W0 | ⬜ pending |
+| 09-02-02 | 02 | 1 | SHLL-02, SHLL-03 | unit | `pytest tests/test_interactive_shell.py -k "resize or sigint or ctrl" -v` | ✅ after W0 | ⬜ pending |
+| 09-02-03 | 02 | 1 | SHLL-01, SHLL-02, SHLL-03, SHLL-04 | unit (full) | `pytest tests/test_interactive_shell.py --tb=short` | ✅ after W0 | ⬜ pending |
+| 09-03-01 | 03 | 2 | SHLL-01, SHLL-04 | unit | `pytest tests/test_transport.py -k "connect" -v` | ✅ | ⬜ pending |
+| 09-03-02 | 03 | 2 | SHLL-01, SHLL-04 | integration | `pytest tests/test_transport_cli_integration.py -k "connect" -v` | ✅ | ⬜ pending |
 
 *Status values: ⬜ pending · ✅ green · ❌ red · ⚠️ flaky*
 
@@ -54,7 +58,9 @@ created: 2026-04-19
 
 > Test scaffolding committed BEFORE any implementation task. Executor runs Wave 0 first.
 
-- [ ] `tests/test_interactive_shell.py` — stubs/failing tests for SHLL-01 through SHLL-04 (TTY setup, terminal dimensions, Ctrl+C forwarding, terminal restore)
+- [ ] `tests/test_interactive_shell.py` — 14 genuine failing tests for SHLL-01 through SHLL-04: TTY setup/guards, terminal dimension frame, Ctrl+C SIGINT forwarding, SIGWINCH resize, I/O loop, terminal restore under all exit conditions
+
+All 14 tests call `LeaseShellTransport.connect()` with patched `termios`/`tty`/`signal`/WebSocket and fail RED because `connect()` raises `NotImplementedError`. Tests are genuine test contracts — not `pytest.fail()` stubs.
 
 ---
 
@@ -64,8 +70,8 @@ created: 2026-04-19
 
 | Behavior | Requirement | Why Manual | Test Instructions |
 |----------|-------------|------------|-------------------|
-| Interactive TTY session looks/feels correct | SHLL-01 | Live terminal session with full duplex I/O cannot be fully automated in CI | Run `just connect --transport lease-shell` against a real deployment; verify shell prompt appears and commands execute |
-| Terminal restore after Ctrl+D exit | SHLL-04 | Requires real TTY — CI runs with non-TTY stdin | After session ends, verify `echo hello` works without running `reset` |
+| Interactive TTY session looks/feels correct in real terminal | SHLL-01 | Live terminal session with full duplex I/O cannot be fully verified in CI | Run `just connect --transport lease-shell` against a real deployment; verify shell prompt appears, commands execute, arrow keys work |
+| Terminal is usable after session ends (no `reset` needed) | SHLL-04 | Requires real TTY — CI runs with non-TTY stdin | After session ends normally (Ctrl+D), verify `echo hello` works in the local terminal without running `reset` |
 
 ---
 
@@ -73,14 +79,14 @@ created: 2026-04-19
 
 Updated by `nf-plan-checker` when plans are approved:
 
-- [ ] All tasks have `<automated>` verify commands or Wave 0 dependencies
-- [ ] No 3 consecutive implementation tasks without automated verify (sampling continuity)
-- [ ] Wave 0 test files cover all MISSING references
-- [ ] No watch-mode flags in any automated command
-- [ ] Feedback latency per task: < 30s ✅
-- [ ] `nyquist_compliant: true` set in frontmatter
+- [x] All tasks have `<automated>` verify commands or Wave 0 dependencies
+- [x] No 3 consecutive implementation tasks without automated verify (sampling continuity)
+- [x] Wave 0 test files cover all MISSING references
+- [x] No watch-mode flags in any automated command
+- [x] Feedback latency per task: < 30s ✅
+- [x] `nyquist_compliant: true` set in frontmatter
 
-**Plan-checker approval:** {pending / approved on YYYY-MM-DD}
+**Plan-checker approval:** approved on 2026-04-19
 
 ---
 
@@ -90,7 +96,8 @@ Updated during `/nf:execute-phase 9`:
 
 | Wave | Tasks | Tests Run | Pass | Fail | Sampling Status |
 |------|-------|-----------|------|------|-----------------|
-| 0 | {N} | — | — | — | scaffold |
-| 1 | {N} | `pytest --tb=short` | TBD | TBD | ⬜ pending |
+| 0 | 1 | `pytest tests/test_interactive_shell.py -q` | TBD | TBD | scaffold |
+| 1 | 3 | `pytest --tb=short` | TBD | TBD | ⬜ pending |
+| 2 | 2 | `pytest --tb=short` | TBD | TBD | ⬜ pending |
 
 **Phase validation complete:** pending
