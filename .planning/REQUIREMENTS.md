@@ -37,7 +37,7 @@
 
 ### Testing
 
-- [ ] **TEST-01**: `just test-shell` E2E recipe deploys an instance, exercises exec/inject/connect via lease-shell, and tears down
+- [x] **TEST-01**: `just test-shell` E2E recipe deploys an instance, exercises exec/inject/connect via lease-shell, and tears down
 - [x] **TEST-02**: Unit tests cover the transport layer with a mocked WebSocket
 
 ## Future Requirements (v1.6+)
@@ -81,7 +81,7 @@
 | SHLL-02 | Phase 9 | Pending |
 | SHLL-03 | Phase 9 | Pending |
 | SHLL-04 | Phase 9 | Pending |
-| TEST-01 | Phase 11 | Pending |
+| TEST-01 | Phase 11 | Complete |
 | TEST-02 | Phase 11 | Complete |
 
 **Coverage:**

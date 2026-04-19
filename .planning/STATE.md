@@ -34,6 +34,7 @@ Progress: [████████████████████] 10/10 p
 - Last 5 plans: —
 - Trend: —
 | Phase 07-lease-shell-exec P02 | 10 | 2 tasks | 2 files |
+| Phase 11 P02 | 12 | 2 tasks | 2 files |
 
 ## Accumulated Context
 
@@ -57,6 +58,8 @@ Progress: [████████████████████] 10/10 p
 - **[Phase 10-02] Automatic fallback via validate() check** — when lease-shell unavailable, falls back to SSH with notice to stderr
 - **[Phase 11] test_transport_errors.py is a standalone file** — FakeWebSocket copied (not imported) to avoid cross-file coupling
 - **[Phase 11] connect() E2E is manual-only** — subprocess-based E2E cannot automate full-duplex TTY; inject-verify-via-exec is the automated substitute
+- [Phase 11]: [Phase 11-02] No connect() step in E2E orchestrator — connect() requires interactive TTY; inject+verify-via-exec is the automated substitute
+- [Phase 11]: [Phase 11-02] just test-shell recipe follows test/test-secrets pattern — consistent Justfile recipe structure for all E2E tests
 
 ### Pending Todos
 
