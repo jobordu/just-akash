@@ -371,8 +371,8 @@ class TestExecHappyPath:
         assert exit_code == 0
         mock_connect.assert_called_once()
         connect_msg = json.loads(fake_ws.sent_messages[0])
-        assert "cmd=" in connect_msg["url"]
-        assert "echo+hello" in connect_msg["url"]
+        assert "cmd0=" in connect_msg["url"]
+        assert "echo" in connect_msg["url"]
 
     def test_exec_captures_stderr(self):
         config = TransportConfig(

@@ -115,13 +115,14 @@ def main():
             log_fail(f"{var} not set")
             sys.exit(1)
 
-    ssh_key = None
-    for candidate in [
-        os.path.expanduser(f"~/.ssh/id_ed25519_akash_node{i}") for i in range(1, 4)
-    ] + [os.path.expanduser("~/.ssh/id_ed25519")]:
-        if os.path.exists(candidate):
-            ssh_key = candidate
-            break
+    ssh_key = os.environ.get("SSH_KEY_PATH")
+    if not ssh_key:
+        for candidate in [
+            os.path.expanduser(f"~/.ssh/id_ed25519_akash_node{i}") for i in range(1, 4)
+        ] + [os.path.expanduser("~/.ssh/id_ed25519")]:
+            if os.path.exists(candidate):
+                ssh_key = candidate
+                break
     if not ssh_key:
         log_fail("No SSH private key found")
         sys.exit(1)

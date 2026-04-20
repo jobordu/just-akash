@@ -15,4 +15,5 @@ paths = [
   '''^tests/''',
   '''^just_akash/test_.*\.py$''',
   '''\.gitleaks\.toml$''',
+  '''^\.planning/''',
 ]

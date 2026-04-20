@@ -105,14 +105,16 @@ jobs:
       - name: Install dependencies
         run: uv sync --dev
 
-      - name: Install just
-        uses: taiki-e/install-action@v2
-        with:
-          tool: just
+      - name: Generate SSH key for E2E
+        run: |
+          mkdir -p ~/.ssh
+          ssh-keygen -t ed25519 -f ~/.ssh/id_ed25519 -N "" -C "akash-e2e"
+          echo "SSH_KEY_PATH=~/.ssh/id_ed25519" >> "$GITHUB_ENV"
 
       - name: Run E2E secrets test
         env:
           AKASH_API_KEY: ${{ secrets.AKASH_API_KEY }}
           AKASH_PROVIDERS: ${{ secrets.AKASH_PROVIDERS }}
           SSH_PUBKEY: ${{ secrets.SSH_PUBKEY }}
+          SSH_KEY_PATH: ~/.ssh/id_ed25519
         run: uv run python -m just_akash.test_secrets_e2e

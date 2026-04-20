@@ -133,11 +133,10 @@ class LeaseShellTransport(Transport):
             return next(iter(services))
         return None
 
-    def _build_provider_ws_url(
+    def _build_provider_shell_path(
         self, command: str | None = None, tty: bool = False, stdin: bool = False
     ) -> str:
         assert self._provider_host_uri is not None
-        ws_base = self._provider_host_uri.replace("https://", "wss://").replace("http://", "ws://")
         dseq = self._config.dseq
         params: dict[str, str | None] = {
             "service": self._service,
@@ -145,22 +144,28 @@ class LeaseShellTransport(Transport):
             "stdin": "true" if stdin else "false",
         }
         if command is not None:
-            params["cmd"] = command
+            cmd_parts = command.split(" ")
+            parts = []
+            for i, part in enumerate(cmd_parts):
+                parts.append(f"cmd{i}={urllib.parse.quote(part, safe='')}")
+            params_str = "&".join(parts)
+            qs = urllib.parse.urlencode(params)
+            return f"/lease/{dseq}/1/1/shell?{qs}&{params_str}"
         qs = urllib.parse.urlencode(params)
-        return f"{ws_base}/lease/{dseq}/1/1/shell?{qs}"
+        return f"/lease/{dseq}/1/1/shell?{qs}"
 
     def _build_proxy_connect_msg(
-        self, provider_ws_url: str, jwt: str, stdin_data: str | None = None
+        self, shell_path: str, jwt: str, stdin_data: str | None = None
     ) -> str:
         msg: dict = {
             "type": "websocket",
-            "url": provider_ws_url,
+            "url": shell_path,
             "providerAddress": self._provider_address,
             "auth": {"type": "jwt", "token": jwt},
+            "isBase64": True,
         }
         if stdin_data is not None:
             msg["data"] = base64.b64encode(stdin_data.encode("utf-8")).decode("ascii")
-            msg["isBase64"] = True
         return json.dumps(msg)
 
     def _get_proxy_ws_url(self) -> str:
@@ -202,9 +207,18 @@ class LeaseShellTransport(Transport):
         if isinstance(raw, str):
             try:
                 msg = json.loads(raw)
-                if msg.get("type") == "error":
+                msg_type = msg.get("type", "")
+                if msg_type in ("ping", "pong"):
+                    return None
+                if msg_type == "error":
                     raise RuntimeError(f"Proxy error: {msg.get('message', msg)}")
                 message = msg.get("message")
+                if isinstance(message, dict) and "data" in message:
+                    data = message["data"]
+                    if isinstance(data, list):
+                        return bytes(data)
+                    if isinstance(data, str):
+                        return base64.b64decode(data)
                 if isinstance(message, str):
                     return base64.b64decode(message)
                 if isinstance(message, (bytes, bytearray)):
@@ -221,9 +235,9 @@ class LeaseShellTransport(Transport):
 
         while attempts < MAX_RECONNECT_ATTEMPTS:
             jwt = self._fetch_jwt()
-            provider_ws_url = self._build_provider_ws_url(command=command)
+            shell_path = self._build_provider_shell_path(command=command)
             proxy_url = self._get_proxy_ws_url()
-            connect_msg = self._build_proxy_connect_msg(provider_ws_url, jwt)
+            connect_msg = self._build_proxy_connect_msg(shell_path, jwt)
             ssl_ctx = ssl.create_default_context()
 
             try:
@@ -232,7 +246,7 @@ class LeaseShellTransport(Transport):
                     ssl=ssl_ctx,
                     compression=None,
                     open_timeout=30,
-                    ping_interval=20,
+                    ping_interval=30,
                     ping_timeout=20,
                 ) as ws:
                     ws.send(connect_msg)
@@ -315,9 +329,9 @@ class LeaseShellTransport(Transport):
 
     def _run_interactive_session(self) -> None:
         jwt = self._fetch_jwt()
-        provider_ws_url = self._build_provider_ws_url(tty=True, stdin=True)
+        shell_path = self._build_provider_shell_path(tty=True, stdin=True)
         proxy_url = self._get_proxy_ws_url()
-        connect_msg = self._build_proxy_connect_msg(provider_ws_url, jwt)
+        connect_msg = self._build_proxy_connect_msg(shell_path, jwt)
         ssl_ctx = ssl.create_default_context()
 
         with connect(
@@ -325,7 +339,7 @@ class LeaseShellTransport(Transport):
             ssl=ssl_ctx,
             compression=None,
             open_timeout=30,
-            ping_interval=20,
+            ping_interval=30,
             ping_timeout=20,
         ) as ws:
             ws.send(connect_msg)
