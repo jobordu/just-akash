@@ -789,7 +789,10 @@ class TestNotImplementedMethods:
         transport._service = "web"
         from unittest.mock import patch
 
-        with patch.object(transport, "exec", side_effect=[0, 0, 0]):
+        with (
+            patch.object(transport, "exec", side_effect=[0, 0]),
+            patch.object(transport, "_exec_shell_command", return_value=0),
+        ):
             transport.inject("/tmp/file", "content")
 
     def test_connect_does_not_raise_not_implemented(self):

@@ -152,7 +152,12 @@ class TestTransportFlagParsed:
         with (
             patch("just_akash.api.AkashConsoleAPI", return_value=client),
             patch(
-                "just_akash.transport.lease_shell.LeaseShellTransport.exec", side_effect=[0, 0, 0]
+                "just_akash.transport.lease_shell.LeaseShellTransport.exec",
+                side_effect=[0, 0],
+            ),
+            patch(
+                "just_akash.transport.lease_shell.LeaseShellTransport._exec_shell_command",
+                return_value=0,
             ),
         ):
             rc = _run(
@@ -346,8 +351,11 @@ class TestLeaseShellStubBehaviour:
         t = self._t_with_deployment()
         t._provider_host_uri = "https://provider.example.com"
         t._service = "web"
-        with patch.object(t, "exec", side_effect=[0, 0, 0]):
-            t.inject("/tmp/x", "content")  # Must NOT raise
+        with (
+            patch.object(t, "exec", side_effect=[0, 0]),
+            patch.object(t, "_exec_shell_command", return_value=0),
+        ):
+            t.inject("/tmp/x", "content")
 
     def test_connect_does_not_raise_not_implemented(self):
         """Phase 9: connect() is implemented — NotImplementedError stub is gone."""

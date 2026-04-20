@@ -169,6 +169,23 @@ class LeaseShellTransport(Transport):
         qs = "&".join(qs_parts)
         return f"{self._provider_host_uri}/lease/{dseq}/1/1/shell?{qs}"
 
+    def _build_shell_url_sh_c(
+        self, shell_command: str, tty: bool = False, stdin: bool = False
+    ) -> str:
+        assert self._provider_host_uri is not None
+        dseq = self._config.dseq
+        qs_parts = [
+            "podIndex=0",
+            f"service={urllib.parse.quote(self._service or '', safe='')}",
+            f"tty={'true' if tty else 'false'}",
+            f"stdin={'true' if stdin else 'false'}",
+            "cmd0=sh",
+            "cmd1=-c",
+            f"cmd2={urllib.parse.quote(shell_command, safe='')}",
+        ]
+        qs = "&".join(qs_parts)
+        return f"{self._provider_host_uri}/lease/{dseq}/1/1/shell?{qs}"
+
     def _build_proxy_connect_msg(
         self, shell_path: str, jwt: str, stdin_data: str | None = None
     ) -> str:
@@ -252,12 +269,17 @@ class LeaseShellTransport(Transport):
         return None
 
     def _exec_with_refresh(self, command: str) -> int:
+        return self._exec_loop(self._build_provider_shell_url(command=command))
+
+    def _exec_shell_command(self, shell_command: str) -> int:
+        return self._exec_loop(self._build_shell_url_sh_c(shell_command=shell_command))
+
+    def _exec_loop(self, shell_path: str) -> int:
         attempts = 0
         exit_code = 0
 
         while attempts < MAX_RECONNECT_ATTEMPTS:
             jwt = self._fetch_jwt()
-            shell_path = self._build_provider_shell_url(command=command)
             proxy_url = self._get_proxy_ws_url()
             connect_msg = self._build_proxy_connect_msg(shell_path, jwt)
             ssl_ctx = ssl.create_default_context()
@@ -310,21 +332,145 @@ class LeaseShellTransport(Transport):
         if self._service is None:
             self.prepare()
 
-        mkdir_cmd = f"mkdir -p $(dirname {shlex.quote(remote_path)})"
-        rc = self.exec(f"sh -c {shlex.quote(mkdir_cmd)}")
-        if rc != 0:
-            raise RuntimeError(f"Failed to create directory for {remote_path}: exit {rc}")
+        parent = os.path.dirname(remote_path)
+        if parent:
+            rc = self.exec(f"mkdir -p {shlex.quote(parent)}")
+            if rc != 0:
+                raise RuntimeError(f"Failed to create directory for {remote_path}: exit {rc}")
 
         encoded = base64.b64encode(content.encode("utf-8")).decode("ascii")
-        write_cmd = f"echo {shlex.quote(encoded)} | base64 -d > {shlex.quote(remote_path)}"
-        rc = self.exec(f"sh -c {shlex.quote(write_cmd)}")
+        shell_cmd = f"echo {encoded} | base64 -d > {shlex.quote(remote_path)}"
+        rc = self._exec_shell_command(shell_cmd)
         if rc != 0:
             raise RuntimeError(f"Failed to write {remote_path}: exit {rc}")
 
-        chmod_cmd = f"chmod 600 {shlex.quote(remote_path)}"
-        rc = self.exec(f"sh -c {shlex.quote(chmod_cmd)}")
+        rc = self.exec(f"chmod 600 {shlex.quote(remote_path)}")
         if rc != 0:
             raise RuntimeError(f"Failed to set permissions on {remote_path}: exit {rc}")
+
+    def _exec_with_stdin(self, command: str, stdin_data: bytes) -> int:
+        attempts = 0
+        exit_code = 0
+
+        while attempts < MAX_RECONNECT_ATTEMPTS:
+            jwt = self._fetch_jwt()
+            shell_url = self._build_provider_shell_url(command=command, stdin=True)
+            proxy_url = self._get_proxy_ws_url()
+            ssl_ctx = ssl.create_default_context()
+
+            try:
+                with connect(
+                    proxy_url,
+                    ssl=ssl_ctx,
+                    compression=None,
+                    open_timeout=30,
+                    ping_interval=30,
+                    ping_timeout=20,
+                ) as ws:
+                    connect_msg = self._build_proxy_connect_msg(shell_url, jwt)
+                    ws.send(connect_msg)
+
+                    stdin_frame = bytes([_FRAME_STDIN]) + stdin_data
+                    ws.send(
+                        json.dumps(
+                            {
+                                "type": "websocket",
+                                "data": base64.b64encode(stdin_frame).decode("ascii"),
+                                "isBase64": True,
+                            }
+                        )
+                    )
+
+                    while True:
+                        try:
+                            frame = self._recv_proxy_message(ws, timeout=300)
+                        except ConnectionClosedOK:
+                            return exit_code
+                        except ConnectionClosedError as exc:
+                            if _is_auth_expiry(exc):
+                                break
+                            raise
+                        if frame is None:
+                            continue
+                        result = self._dispatch_frame(frame)
+                        if result is not None:
+                            return result
+            except RuntimeError as exc:
+                if _is_auth_expiry_message(str(exc)):
+                    pass
+                else:
+                    raise
+            attempts += 1
+
+        raise RuntimeError(f"Failed to re-authenticate after {MAX_RECONNECT_ATTEMPTS} attempts.")
+
+    def _exec_with_stdin_command(self, shell_command: str, stdin_data: bytes) -> int:
+        import time
+
+        attempts = 0
+        exit_code = 0
+
+        while attempts < MAX_RECONNECT_ATTEMPTS:
+            jwt = self._fetch_jwt()
+            shell_url = self._build_shell_url_sh_c(shell_command=shell_command, stdin=True)
+            proxy_url = self._get_proxy_ws_url()
+            ssl_ctx = ssl.create_default_context()
+
+            try:
+                with connect(
+                    proxy_url,
+                    ssl=ssl_ctx,
+                    compression=None,
+                    open_timeout=30,
+                    ping_interval=30,
+                    ping_timeout=20,
+                ) as ws:
+                    connect_msg = self._build_proxy_connect_msg(shell_url, jwt)
+                    ws.send(connect_msg)
+                    time.sleep(0.5)
+
+                    stdin_frame = bytes([_FRAME_STDIN]) + stdin_data
+                    ws.send(
+                        json.dumps(
+                            {
+                                "type": "websocket",
+                                "data": base64.b64encode(stdin_frame).decode("ascii"),
+                                "isBase64": True,
+                            }
+                        )
+                    )
+                    ws.send(
+                        json.dumps(
+                            {
+                                "type": "websocket",
+                                "data": base64.b64encode(bytes([_FRAME_STDIN])).decode("ascii"),
+                                "isBase64": True,
+                            }
+                        )
+                    )
+
+                    while True:
+                        try:
+                            frame = self._recv_proxy_message(ws, timeout=300)
+                        except ConnectionClosedOK:
+                            return exit_code
+                        except ConnectionClosedError as exc:
+                            if _is_auth_expiry(exc):
+                                break
+                            raise
+                        if frame is None:
+                            continue
+                        result = self._dispatch_frame(frame)
+                        if result is not None:
+                            return result
+            except RuntimeError as exc:
+                if _is_auth_expiry_message(str(exc)):
+                    pass
+                else:
+                    raise
+            attempts += 1
+
+        raise RuntimeError(f"Failed to re-authenticate after {MAX_RECONNECT_ATTEMPTS} attempts.")
 
     def connect(self) -> None:
         if sys.platform == "win32":
