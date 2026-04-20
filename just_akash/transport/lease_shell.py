@@ -136,9 +136,10 @@ class LeaseShellTransport(Transport):
     def _build_provider_ws_url(
         self, command: str | None = None, tty: bool = False, stdin: bool = False
     ) -> str:
+        assert self._provider_host_uri is not None
         ws_base = self._provider_host_uri.replace("https://", "wss://").replace("http://", "ws://")
         dseq = self._config.dseq
-        params: dict[str, str] = {
+        params: dict[str, str | None] = {
             "service": self._service,
             "tty": "true" if tty else "false",
             "stdin": "true" if stdin else "false",
