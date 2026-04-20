@@ -105,16 +105,7 @@ class LeaseShellTransport(Transport):
         if provider_addr:
             self._provider_address = provider_addr
 
-        provider = lease.get("provider", {})
-        if not isinstance(provider, dict):
-            raise RuntimeError("Unexpected provider format in lease data.")
-        host_uri: str | None = provider.get("hostUri") or provider.get("host_uri")
-        if not host_uri:
-            raise RuntimeError(
-                "Provider hostUri not found in deployment lease data. "
-                f"Available provider keys: {list(provider.keys())}"
-            )
-        self._provider_host_uri = host_uri
+        host_uri = self._resolve_host_uri(lease, provider_addr)
 
         service = self._config.service_name or self._infer_service()
         if not service:
@@ -124,6 +115,31 @@ class LeaseShellTransport(Transport):
             )
         self._service = service
         return host_uri, service
+
+    def _resolve_host_uri(self, lease: dict, provider_addr: str) -> str:
+        provider = lease.get("provider", {})
+        if isinstance(provider, dict):
+            host_uri = provider.get("hostUri") or provider.get("host_uri")
+            if host_uri:
+                self._provider_host_uri = host_uri
+                return host_uri
+
+        if not provider_addr:
+            raise RuntimeError(
+                "Cannot resolve provider hostUri: no provider address found in lease data."
+            )
+
+        provider_data = self._get_api_client().get_provider(provider_addr)
+        if provider_data and isinstance(provider_data, dict):
+            host_uri = provider_data.get("hostUri")
+            if host_uri:
+                self._provider_host_uri = host_uri
+                return host_uri
+
+        raise RuntimeError(
+            f"Could not resolve provider hostUri for {provider_addr}. "
+            "Ensure the provider is registered and the API is accessible."
+        )
 
     def _infer_service(self) -> str | None:
         leases = self._config.deployment.get("leases", [])
@@ -136,26 +152,22 @@ class LeaseShellTransport(Transport):
             return next(iter(services))
         return None
 
-    def _build_provider_shell_path(
+    def _build_provider_shell_url(
         self, command: str | None = None, tty: bool = False, stdin: bool = False
     ) -> str:
         assert self._provider_host_uri is not None
         dseq = self._config.dseq
-        params: dict[str, str | None] = {
-            "service": self._service,
-            "tty": "true" if tty else "false",
-            "stdin": "true" if stdin else "false",
-        }
+        qs_parts = [
+            "podIndex=0",
+            f"service={urllib.parse.quote(self._service or '', safe='')}",
+            f"tty={'true' if tty else 'false'}",
+            f"stdin={'true' if stdin else 'false'}",
+        ]
         if command is not None:
-            cmd_parts = command.split(" ")
-            parts = []
-            for i, part in enumerate(cmd_parts):
-                parts.append(f"cmd{i}={urllib.parse.quote(part, safe='')}")
-            params_str = "&".join(parts)
-            qs = urllib.parse.urlencode(params)
-            return f"/lease/{dseq}/1/1/shell?{qs}&{params_str}"
-        qs = urllib.parse.urlencode(params)
-        return f"/lease/{dseq}/1/1/shell?{qs}"
+            for i, part in enumerate(command.split(" ")):
+                qs_parts.append(f"cmd{i}={urllib.parse.quote(part, safe='')}")
+        qs = "&".join(qs_parts)
+        return f"{self._provider_host_uri}/lease/{dseq}/1/1/shell?{qs}"
 
     def _build_proxy_connect_msg(
         self, shell_path: str, jwt: str, stdin_data: str | None = None
@@ -195,15 +207,15 @@ class LeaseShellTransport(Transport):
             sys.stderr.buffer.write(payload)
             sys.stderr.buffer.flush()
         elif code == 102:
+            try:
+                return int(json.loads(payload).get("exit_code", 0))
+            except (json.JSONDecodeError, TypeError, ValueError, AttributeError):
+                pass
             if len(payload) >= 4:
                 try:
                     return int.from_bytes(payload[:4], "little")
                 except (ValueError, OverflowError):
                     pass
-            try:
-                return int(json.loads(payload).get("exit_code", 0))
-            except (json.JSONDecodeError, TypeError, ValueError, AttributeError):
-                pass
             return 0
         elif code == 103:
             msg = payload.decode("utf-8", errors="replace")
@@ -245,7 +257,7 @@ class LeaseShellTransport(Transport):
 
         while attempts < MAX_RECONNECT_ATTEMPTS:
             jwt = self._fetch_jwt()
-            shell_path = self._build_provider_shell_path(command=command)
+            shell_path = self._build_provider_shell_url(command=command)
             proxy_url = self._get_proxy_ws_url()
             connect_msg = self._build_proxy_connect_msg(shell_path, jwt)
             ssl_ctx = ssl.create_default_context()
@@ -339,7 +351,7 @@ class LeaseShellTransport(Transport):
 
     def _run_interactive_session(self) -> None:
         jwt = self._fetch_jwt()
-        shell_path = self._build_provider_shell_path(tty=True, stdin=True)
+        shell_path = self._build_provider_shell_url(tty=True, stdin=True)
         proxy_url = self._get_proxy_ws_url()
         connect_msg = self._build_proxy_connect_msg(shell_path, jwt)
         ssl_ctx = ssl.create_default_context()

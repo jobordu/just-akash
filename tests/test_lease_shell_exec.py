@@ -208,7 +208,7 @@ class TestProviderInfoExtraction:
         )
         transport = LeaseShellTransport(config)
 
-        with pytest.raises(RuntimeError, match="Provider hostUri not found"):
+        with pytest.raises(RuntimeError, match="Cannot resolve provider hostUri"):
             transport._extract_provider_info()
 
     def test_extract_provider_info_host_uri_snake_case_fallback(self):
@@ -498,10 +498,10 @@ class TestBuildShellPath:
         transport = LeaseShellTransport(config)
         transport._provider_host_uri = "https://provider.com"
         transport._service = "web"
-        path = transport._build_provider_shell_path(command="echo hello; cat /etc/passwd")
-        assert ";" not in path
-        assert "%3B" in path
-        assert "cmd1=hello%3B" in path
+        url = transport._build_provider_shell_url(command="echo hello; cat /etc/passwd")
+        assert ";" not in url
+        assert "%3B" in url
+        assert "cmd1=hello%3B" in url
 
     def test_build_shell_path_whitespace_only_command_produces_empty_cmd_params(self):
         """Whitespace-only command splits into empty cmd params — edge-case URL generation."""
@@ -513,11 +513,10 @@ class TestBuildShellPath:
         transport = LeaseShellTransport(config)
         transport._provider_host_uri = "https://provider.com"
         transport._service = "web"
-        path = transport._build_provider_shell_path(command="   ")
-        # "   ".split(" ") → ['', '', '', '']  →  cmd0=&cmd1=&cmd2=&cmd3=
-        assert "cmd0=" in path
-        assert "cmd3=" in path
-        assert path.startswith("/lease/123/1/1/shell?")
+        url = transport._build_provider_shell_url(command="   ")
+        assert "cmd0=" in url
+        assert "cmd3=" in url
+        assert "/lease/123/1/1/shell?" in url
 
 
 # --- exec() Happy Path Tests ---
