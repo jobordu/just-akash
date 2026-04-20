@@ -311,18 +311,18 @@ class LeaseShellTransport(Transport):
             self.prepare()
 
         mkdir_cmd = f"mkdir -p $(dirname {shlex.quote(remote_path)})"
-        rc = self.exec(mkdir_cmd)
+        rc = self.exec(f"sh -c {shlex.quote(mkdir_cmd)}")
         if rc != 0:
             raise RuntimeError(f"Failed to create directory for {remote_path}: exit {rc}")
 
         encoded = base64.b64encode(content.encode("utf-8")).decode("ascii")
         write_cmd = f"echo {shlex.quote(encoded)} | base64 -d > {shlex.quote(remote_path)}"
-        rc = self.exec(write_cmd)
+        rc = self.exec(f"sh -c {shlex.quote(write_cmd)}")
         if rc != 0:
             raise RuntimeError(f"Failed to write {remote_path}: exit {rc}")
 
         chmod_cmd = f"chmod 600 {shlex.quote(remote_path)}"
-        rc = self.exec(chmod_cmd)
+        rc = self.exec(f"sh -c {shlex.quote(chmod_cmd)}")
         if rc != 0:
             raise RuntimeError(f"Failed to set permissions on {remote_path}: exit {rc}")
 

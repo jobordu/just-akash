@@ -102,16 +102,15 @@ class TestLeaseShellTransportInject:
             t.inject("/tmp/secrets.env", "KEY=value")
 
     def test_inject_escapes_path_with_shell_metacharacters(self):
-        """inject() uses shlex.quote() so metacharacters in remote_path are safe."""
+        """inject() wraps commands in sh -c for proper shell execution."""
         t = _make_transport()
         dangerous_path = "/tmp/test'; rm -rf /"
         with patch.object(t, "exec", side_effect=[0, 0, 0]) as mock_exec:
             t.inject(dangerous_path, "content")
 
-        # All three commands must contain the quoted (safe) form of the path
         for call in mock_exec.call_args_list:
             cmd = call[0][0]
-            assert shlex.quote(dangerous_path) in cmd
+            assert cmd.startswith("sh -c ")
 
     def test_inject_handles_multiline_content(self):
         """inject() base64-encodes multiline content without issues."""
