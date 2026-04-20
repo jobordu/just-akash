@@ -275,13 +275,13 @@ class TestMakeTransportRouting:
 
         deployment = {"leases": []}
         t = make_transport("ssh", dseq="123", api_key="key", deployment=deployment)
-        assert t._config.deployment == deployment
+        assert t._config.deployment == deployment  # type: ignore[attr-defined]
 
     def test_make_transport_with_service_name(self):
         from just_akash.transport import make_transport
 
         t = make_transport("lease-shell", dseq="123", api_key="key", service_name="web")
-        assert t._config.service_name == "web"
+        assert t._config.service_name == "web"  # type: ignore[attr-defined]
 
     def test_make_transport_with_console_url_override(self):
         from just_akash.transport import make_transport
@@ -289,7 +289,7 @@ class TestMakeTransportRouting:
         t = make_transport(
             "ssh", dseq="123", api_key="key", console_url="https://custom.akash.example.com"
         )
-        assert t._config.console_url == "https://custom.akash.example.com"
+        assert t._config.console_url == "https://custom.akash.example.com"  # type: ignore[attr-defined]
 
 
 # ---------------------------------------------------------------------------

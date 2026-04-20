@@ -223,7 +223,7 @@ class TestLeaseShellConnect:
 
     def test_sigint_sends_frame_104_with_0x03(self):
         t = _make_transport()
-        captured_handler = [None]
+        captured_handler: list[object] = [None]
 
         def capture_signal(sig, handler):
             if sig == signal.SIGINT and callable(handler):
@@ -252,7 +252,7 @@ class TestLeaseShellConnect:
 
         assert captured_handler[0] is not None, "SIGINT handler was never registered"
         ws_instance.send.reset_mock()
-        captured_handler[0](signal.SIGINT, None)
+        captured_handler[0](signal.SIGINT, None)  # type: ignore[call-arg]
         sent_frames = _decode_proxy_send(ws_instance.send.call_args_list)
         assert bytes([104, 0x03]) in sent_frames
 
@@ -280,7 +280,7 @@ class TestLeaseShellConnect:
 
     def test_sigwinch_sends_frame_105_with_new_size(self):
         t = _make_transport()
-        captured_handler = [None]
+        captured_handler: list[object] = [None]
 
         def capture_signal(sig, handler):
             if sig == signal.SIGWINCH and callable(handler):
@@ -309,7 +309,7 @@ class TestLeaseShellConnect:
 
         assert captured_handler[0] is not None, "SIGWINCH handler was never registered"
         ws_instance.send.reset_mock()
-        captured_handler[0](signal.SIGWINCH, None)
+        captured_handler[0](signal.SIGWINCH, None)  # type: ignore[call-arg]
         sent_frames = _decode_proxy_send(ws_instance.send.call_args_list)
         resize_frames = [f for f in sent_frames if f[0] == 105]
         assert resize_frames, "SIGWINCH handler did not send a resize frame (code 105)"

@@ -809,7 +809,7 @@ class TestFormatDeploymentsTableNonDictEntry:
         from just_akash import api
 
         monkeypatch.setattr(api, "TAGS_FILE", tmp_path / ".tags.json")
-        result = format_deployments_table([None, "string", 42])
+        result = format_deployments_table([None, "string", 42])  # type: ignore[arg-type]
         assert isinstance(result, str)
 
     def test_mixed_valid_and_invalid(self, tmp_path, monkeypatch):
@@ -817,7 +817,7 @@ class TestFormatDeploymentsTableNonDictEntry:
 
         monkeypatch.setattr(api, "TAGS_FILE", tmp_path / ".tags.json")
         dep = {"dseq": "12345", "deployment": {"state": "active"}, "leases": []}
-        result = format_deployments_table([None, dep])
+        result = format_deployments_table([None, dep])  # type: ignore[arg-type]
         assert "12345" in result
 
 
@@ -829,7 +829,7 @@ class TestFormatDeploymentsJsonNonDictEntry:
         from just_akash import api
 
         monkeypatch.setattr(api, "TAGS_FILE", tmp_path / ".tags.json")
-        result = format_deployments_json([None, "string", 42])
+        result = format_deployments_json([None, "string", 42])  # type: ignore[arg-type]
         parsed = json.loads(result)
         assert isinstance(parsed, list)
 
@@ -838,7 +838,7 @@ class TestFormatDeploymentsJsonNonDictEntry:
 
         monkeypatch.setattr(api, "TAGS_FILE", tmp_path / ".tags.json")
         dep = {"dseq": "12345", "deployment": {"state": "active"}, "leases": []}
-        result = format_deployments_json([dep, None])
+        result = format_deployments_json([dep, None])  # type: ignore[arg-type]
         parsed = json.loads(result)
         assert len(parsed) == 1
         assert parsed[0]["dseq"] == "12345"
@@ -2815,7 +2815,7 @@ class TestRequestHttpErrorListJsonBody:
             url="https://console-api.akash.network/v1/test",
             code=400,
             msg="Bad Request",
-            hdrs={},
+            hdrs={},  # type: ignore[arg-type]
             fp=io.BytesIO(b'["validation error", "field missing"]'),
         )
 
@@ -2838,7 +2838,7 @@ class TestRequestHttpErrorListJsonBody:
             url="https://console-api.akash.network/v1/test",
             code=500,
             msg="Internal Server Error",
-            hdrs={},
+            hdrs={},  # type: ignore[arg-type]
             fp=io.BytesIO(b"Internal server error"),
         )
 

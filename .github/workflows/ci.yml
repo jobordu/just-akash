@@ -74,6 +74,11 @@ jobs:
       - name: Install dependencies
         run: uv sync --dev
 
+      - name: Install just
+        uses: taiki-e/install-action@v2
+        with:
+          tool: just
+
       - name: Run E2E lease-shell test
         env:
           AKASH_API_KEY: ${{ secrets.AKASH_API_KEY }}
@@ -99,6 +104,11 @@ jobs:
 
       - name: Install dependencies
         run: uv sync --dev
+
+      - name: Install just
+        uses: taiki-e/install-action@v2
+        with:
+          tool: just
 
       - name: Run E2E secrets test
         env:
