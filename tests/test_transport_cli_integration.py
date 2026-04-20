@@ -172,7 +172,15 @@ class TestTransportFlagParsed:
 
     def test_connect_accepts_transport_lease_shell(self, monkeypatch, capsys):
         """Phase 9: connect --transport lease-shell is routed to LeaseShellTransport."""
-        client = _mock_client()
+        deployment = {
+            "leases": [
+                {
+                    "provider": {"hostUri": "https://provider.example.com:8443"},
+                    "status": {"services": {"web": {}}},
+                }
+            ]
+        }
+        client = _mock_client(deployment=deployment)
         with (
             patch("just_akash.api.AkashConsoleAPI", return_value=client),
             patch("just_akash.transport.lease_shell.LeaseShellTransport.prepare"),

@@ -145,9 +145,7 @@ def main():
     )
 
     # ── exec ───────────────────────────────────────────
-    exec_p = subparsers.add_parser(
-        "exec", help="Execute a command on a running deployment"
-    )
+    exec_p = subparsers.add_parser("exec", help="Execute a command on a running deployment")
     exec_p.add_argument("--dseq", default="")
     exec_p.add_argument("--key", default="")
     exec_p.add_argument(
@@ -160,9 +158,7 @@ def main():
     exec_p.add_argument("remote_cmd", help="Command to execute remotely")
 
     # ── inject ─────────────────────────────────────────
-    inject_p = subparsers.add_parser(
-        "inject", help="Inject secrets into a running deployment"
-    )
+    inject_p = subparsers.add_parser("inject", help="Inject secrets into a running deployment")
     inject_p.add_argument("--dseq", default="")
     inject_p.add_argument("--key", default="")
     inject_p.add_argument(
@@ -261,9 +257,8 @@ def main():
             use_lease_shell = args.transport == "lease-shell"
             if use_lease_shell:
                 from .transport import make_transport
-                deployment = _enrich_deployment_with_provider(
-                    client, client.get_deployment(dseq)
-                )
+
+                deployment = _enrich_deployment_with_provider(client, client.get_deployment(dseq))
                 transport = make_transport(
                     "lease-shell",
                     dseq=dseq,
@@ -298,9 +293,8 @@ def main():
             use_lease_shell = args.transport == "lease-shell"
             if use_lease_shell:
                 from .transport import make_transport
-                deployment = _enrich_deployment_with_provider(
-                    client, client.get_deployment(dseq)
-                )
+
+                deployment = _enrich_deployment_with_provider(client, client.get_deployment(dseq))
                 transport = make_transport(
                     "lease-shell",
                     dseq=dseq,
@@ -362,9 +356,8 @@ def main():
             use_lease_shell = args.transport == "lease-shell"
             if use_lease_shell:
                 from .transport import make_transport
-                deployment = _enrich_deployment_with_provider(
-                    client, client.get_deployment(dseq)
-                )
+
+                deployment = _enrich_deployment_with_provider(client, client.get_deployment(dseq))
                 transport = make_transport(
                     "lease-shell",
                     dseq=dseq,

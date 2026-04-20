@@ -27,6 +27,7 @@ class SSHTransport(Transport):
         self._ssh_info = _extract_ssh_info(self._config.deployment)
         if not self._ssh_info:
             from just_akash.cli import NO_SSH_MSG
+
             raise RuntimeError(NO_SSH_MSG)
         self._key_path = _find_ssh_key(self._config.ssh_key_path or "")
         if not self._key_path:
@@ -49,20 +50,18 @@ class SSHTransport(Transport):
         # mkdir -p
         subprocess.run(
             ssh_cmd + [f"mkdir -p $(dirname {remote_path})"],
-            capture_output=True, text=True, check=True
+            capture_output=True,
+            text=True,
+            check=True,
         )
         # write content
         result = subprocess.run(
-            ssh_cmd + [f"cat > {remote_path}"],
-            input=content, capture_output=True, text=True
+            ssh_cmd + [f"cat > {remote_path}"], input=content, capture_output=True, text=True
         )
         if result.returncode != 0:
             raise RuntimeError(f"Failed to write secrets: {result.stderr.strip()}")
         # chmod 600
-        subprocess.run(
-            ssh_cmd + [f"chmod 600 {remote_path}"],
-            capture_output=True, text=True
-        )
+        subprocess.run(ssh_cmd + [f"chmod 600 {remote_path}"], capture_output=True, text=True)
 
     def connect(self) -> None:
         """Interactive SSH shell (replaces process via os.execvp — never returns)."""

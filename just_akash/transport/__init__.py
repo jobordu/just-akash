@@ -38,6 +38,4 @@ def make_transport(transport_name: str, **kwargs: object) -> Transport:
         return SSHTransport(config)
     elif transport_name == "lease-shell":
         return LeaseShellTransport(config)
-    raise ValueError(
-        f"Unknown transport: {transport_name!r} (expected 'ssh' or 'lease-shell')"
-    )
+    raise ValueError(f"Unknown transport: {transport_name!r} (expected 'ssh' or 'lease-shell')")
