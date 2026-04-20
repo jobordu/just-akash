@@ -18,11 +18,11 @@ import sys
 import tempfile
 import time
 
-GREEN  = "\033[92m"
-RED    = "\033[91m"
+GREEN = "\033[92m"
+RED = "\033[91m"
 YELLOW = "\033[93m"
-BOLD   = "\033[1m"
-RESET  = "\033[0m"
+BOLD = "\033[1m"
+RESET = "\033[0m"
 
 TOTAL_STEPS = 6
 
@@ -119,7 +119,10 @@ def main():
         log_step(4, f"exec: echo hello from lease-shell (DSEQ={dseq})")
 
         if not failures:
-            r = run(f"uv run just-akash exec 'echo hello from lease-shell' --dseq {dseq}", timeout=30)
+            r = run(
+                f"uv run just-akash exec 'echo hello from lease-shell' --dseq {dseq}",
+                timeout=30,
+            )
             if r.returncode == 0 and "hello from lease-shell" in r.stdout:
                 log_pass("exec: output verified")
             else:
@@ -134,15 +137,14 @@ def main():
         if not failures:
             env_file = None
             try:
-                with tempfile.NamedTemporaryFile(
-                    mode="w", suffix=".env", delete=False
-                ) as tmp:
+                with tempfile.NamedTemporaryFile(mode="w", suffix=".env", delete=False) as tmp:
                     tmp.write("TEST_SECRET=injected_value\n")
                     env_file = tmp.name
 
                 remote_path = "/tmp/e2e-test.env"
                 r = run(
-                    f"uv run just-akash inject --env-file {env_file} --remote-path {remote_path} --dseq {dseq}",
+                    f"uv run just-akash inject --env-file {env_file}"
+                    f" --remote-path {remote_path} --dseq {dseq}",
                     timeout=30,
                 )
                 if r.returncode != 0:
@@ -157,9 +159,7 @@ def main():
                     if r.returncode == 0 and "injected_value" in r.stdout:
                         log_pass("inject: verified injected value via exec")
                     else:
-                        log_fail(
-                            f"inject verify failed (rc={r.returncode}):\n{r.stderr}"
-                        )
+                        log_fail(f"inject verify failed (rc={r.returncode}):\n{r.stderr}")
                         failures.append("inject_verify_failed")
             finally:
                 if env_file and os.path.exists(env_file):

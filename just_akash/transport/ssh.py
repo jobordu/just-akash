@@ -4,8 +4,9 @@ import os
 import subprocess
 from typing import Any
 
-from .base import Transport, TransportConfig
 from just_akash.api import _build_ssh_cmd, _extract_ssh_info, _find_ssh_key
+
+from .base import Transport, TransportConfig
 
 
 class SSHTransport(Transport):

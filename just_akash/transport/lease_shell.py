@@ -23,7 +23,6 @@ import sys
 import termios
 import tty
 import urllib.parse
-from typing import TYPE_CHECKING
 
 from websockets.exceptions import ConnectionClosedError, ConnectionClosedOK
 from websockets.sync.client import connect
@@ -31,7 +30,6 @@ from websockets.sync.client import connect
 from just_akash.api import AkashConsoleAPI
 
 from .base import Transport, TransportConfig
-
 
 MAX_RECONNECT_ATTEMPTS = 3
 
