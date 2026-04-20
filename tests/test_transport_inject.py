@@ -151,3 +151,14 @@ class TestLeaseShellTransportInject:
             t.inject("/tmp/test.env", "KEY=val")
 
         mock_prepare.assert_called_once()
+
+    def test_inject_with_empty_content_produces_valid_write_command(self):
+        """inject() with empty string content must produce a valid base64-d write command."""
+        t = _make_transport()
+        with patch.object(t, "exec", side_effect=[0, 0, 0]) as mock_exec:
+            t.inject("/tmp/empty.env", "")
+
+        write_call = mock_exec.call_args_list[1][0][0]
+        expected_b64 = base64.b64encode(b"").decode("ascii")
+        assert "base64 -d" in write_call
+        assert shlex.quote(expected_b64) in write_call

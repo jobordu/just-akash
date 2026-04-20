@@ -194,6 +194,18 @@ class TestLeaseShellTransportStub:
         """validate() returns True when hostUri present."""
         assert self._stub_with_deployment().validate() is True
 
+    def test_get_proxy_ws_url_preserves_http_in_path(self):
+        """_get_proxy_ws_url must only replace scheme, not 'http://' in path."""
+        config = TransportConfig(
+            dseq="123",
+            api_key="key",
+            provider_proxy_url="https://proxy.example.com/relay/http://backend",
+        )
+        t = LeaseShellTransport(config)
+        url = t._get_proxy_ws_url()
+        assert url.startswith("wss://")
+        assert "http://backend" in url
+
 
 # --- make_transport factory ---
 

@@ -1,5 +1,6 @@
 """Unit tests for LeaseShellTransport.exec() and supporting methods."""
 
+import base64
 import io
 import json
 from unittest.mock import MagicMock, patch
@@ -248,6 +249,25 @@ class TestProviderInfoExtraction:
         with pytest.raises(RuntimeError, match="Cannot determine service name"):
             transport._extract_provider_info()
 
+    def test_extract_provider_info_with_string_id_does_not_crash(self):
+        """Lease 'id' as non-dict must raise RuntimeError, not AttributeError."""
+        config = TransportConfig(
+            dseq="123",
+            api_key="key",
+            deployment={
+                "leases": [
+                    {
+                        "id": "plain-string-id",
+                        "provider": {"hostUri": "https://provider.com"},
+                        "status": {"services": {"web": {}}},
+                    }
+                ]
+            },
+        )
+        transport = LeaseShellTransport(config)
+        with pytest.raises(RuntimeError):
+            transport._extract_provider_info()
+
 
 # --- Frame Dispatch Tests ---
 
@@ -339,6 +359,165 @@ class TestFrameDispatch:
         result = LeaseShellTransport._dispatch_frame(None)  # type: ignore
 
         assert result is None
+
+    def test_dispatch_frame_code_102_json_non_dict_payload_returns_zero(self):
+        """Code 102 with JSON non-dict payload must not crash with AttributeError."""
+        frame = bytes([102]) + b"[1]"
+        result = LeaseShellTransport._dispatch_frame(frame)
+        assert result == 0
+
+
+class TestInferService:
+    def test_infer_service_returns_none_when_services_is_list(self):
+        """_infer_service() must return None when services is a list, not a dict."""
+        config = TransportConfig(
+            dseq="123",
+            api_key="key",
+            deployment={
+                "leases": [
+                    {
+                        "provider": {"hostUri": "https://provider.com"},
+                        "status": {"services": ["web", "api"]},
+                    }
+                ]
+            },
+        )
+        transport = LeaseShellTransport(config)
+
+        assert transport._infer_service() is None
+
+    def test_infer_service_returns_none_when_status_is_string(self):
+        """_infer_service() must return None when lease status is a string."""
+        config = TransportConfig(
+            dseq="123",
+            api_key="key",
+            deployment={
+                "leases": [
+                    {
+                        "provider": {"hostUri": "https://provider.com"},
+                        "status": "active",
+                    }
+                ]
+            },
+        )
+        transport = LeaseShellTransport(config)
+
+        assert transport._infer_service() is None
+
+
+class TestBuildProxyConnectMsg:
+    def test_build_proxy_connect_msg_with_none_provider_address(self):
+        """_build_proxy_connect_msg must produce valid JSON even if _provider_address is None."""
+        config = TransportConfig(
+            dseq="123",
+            api_key="key",
+            deployment=DEPLOYMENT_FIXTURE,
+        )
+        transport = LeaseShellTransport(config)
+        transport._provider_address = None
+
+        result = transport._build_proxy_connect_msg("/lease/123/1/1/shell", "jwt-token")
+        parsed = json.loads(result)
+
+        assert parsed["providerAddress"] is None
+        assert parsed["auth"]["token"] == "jwt-token"
+
+    def test_build_proxy_connect_msg_with_empty_jwt(self):
+        """_build_proxy_connect_msg must produce valid JSON with empty string JWT."""
+        config = TransportConfig(
+            dseq="123",
+            api_key="key",
+            deployment=DEPLOYMENT_FIXTURE,
+        )
+        transport = LeaseShellTransport(config)
+        transport._provider_address = None
+
+        result = transport._build_proxy_connect_msg("/path", "")
+        parsed = json.loads(result)
+
+        assert parsed["auth"]["token"] == ""
+
+    def test_build_proxy_connect_msg_with_null_bytes_in_stdin(self):
+        """_build_proxy_connect_msg must handle stdin_data containing null bytes."""
+        config = TransportConfig(
+            dseq="123",
+            api_key="key",
+            deployment=DEPLOYMENT_FIXTURE,
+        )
+        transport = LeaseShellTransport(config)
+        transport._provider_address = None
+
+        stdin_with_nulls = "hello\x00world\x00"
+        result = transport._build_proxy_connect_msg("/path", "jwt", stdin_data=stdin_with_nulls)
+        parsed = json.loads(result)
+
+        decoded = base64.b64decode(parsed["data"])
+        assert decoded == b"hello\x00world\x00"
+
+
+class TestRecvProxyMessage:
+    def test_recv_proxy_message_returns_none_when_message_data_is_int(self):
+        """_recv_proxy_message must return None when message.data is an integer, not crash."""
+        config = TransportConfig(
+            dseq="123",
+            api_key="key",
+            deployment=DEPLOYMENT_FIXTURE,
+        )
+        transport = LeaseShellTransport(config)
+        ws = MagicMock()
+        ws.recv.return_value = json.dumps({"type": "data", "message": {"data": 42}})
+
+        result = transport._recv_proxy_message(ws)
+
+        assert result is None
+
+    def test_recv_proxy_message_returns_none_when_msg_data_is_list(self):
+        """_recv_proxy_message must return None when top-level msg['data'] is a list."""
+        config = TransportConfig(
+            dseq="123",
+            api_key="key",
+            deployment=DEPLOYMENT_FIXTURE,
+        )
+        transport = LeaseShellTransport(config)
+        ws = MagicMock()
+        ws.recv.return_value = json.dumps({"type": "data", "data": [1, 2, 3]})
+
+        result = transport._recv_proxy_message(ws)
+
+        assert result is None
+
+
+class TestBuildShellPath:
+    def test_build_shell_path_url_encodes_shell_metacharacters(self):
+        """Shell metacharacters (semicolons, pipes) must be URL-encoded, not passed through raw."""
+        config = TransportConfig(
+            dseq="123",
+            api_key="key",
+            deployment=DEPLOYMENT_FIXTURE,
+        )
+        transport = LeaseShellTransport(config)
+        transport._provider_host_uri = "https://provider.com"
+        transport._service = "web"
+        path = transport._build_provider_shell_path(command="echo hello; cat /etc/passwd")
+        assert ";" not in path
+        assert "%3B" in path
+        assert "cmd1=hello%3B" in path
+
+    def test_build_shell_path_whitespace_only_command_produces_empty_cmd_params(self):
+        """Whitespace-only command splits into empty cmd params — edge-case URL generation."""
+        config = TransportConfig(
+            dseq="123",
+            api_key="key",
+            deployment=DEPLOYMENT_FIXTURE,
+        )
+        transport = LeaseShellTransport(config)
+        transport._provider_host_uri = "https://provider.com"
+        transport._service = "web"
+        path = transport._build_provider_shell_path(command="   ")
+        # "   ".split(" ") → ['', '', '', '']  →  cmd0=&cmd1=&cmd2=&cmd3=
+        assert "cmd0=" in path
+        assert "cmd3=" in path
+        assert path.startswith("/lease/123/1/1/shell?")
 
 
 # --- exec() Happy Path Tests ---
@@ -570,6 +749,17 @@ class TestValidate:
                     }
                 ]
             },
+        )
+        transport = LeaseShellTransport(config)
+
+        assert transport.validate() is False
+
+    def test_validate_false_when_leases_is_dict_instead_of_list(self):
+        """validate() must return False when leases is a dict, not a list."""
+        config = TransportConfig(
+            dseq="123",
+            api_key="key",
+            deployment={"leases": {"0": {"provider": {"hostUri": "https://provider.com"}}}},
         )
         transport = LeaseShellTransport(config)
 
@@ -820,4 +1010,14 @@ class TestTokenRefresh:
         assert _is_auth_expiry(exc) is True
 
         exc = make_close_error(1000, "connection reset")
+        assert _is_auth_expiry(exc) is False
+
+    def test_is_auth_expiry_with_rcvd_reason_none_returns_false(self):
+        """Normal close with reason=None must not be detected as auth expiry.
+        Exercises the `or ""` fallback in `getattr(rcvd, "reason", "") or ""`."""
+        exc = MagicMock(spec=ConnectionClosedError)
+        rcvd = MagicMock()
+        rcvd.code = 1000
+        rcvd.reason = None
+        exc.rcvd = rcvd
         assert _is_auth_expiry(exc) is False

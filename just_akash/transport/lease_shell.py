@@ -98,7 +98,10 @@ class LeaseShellTransport(Transport):
         if not isinstance(lease, dict):
             raise RuntimeError("Unexpected lease entry format in deployment data.")
 
-        provider_addr = lease.get("id", {}).get("provider", "")
+        lease_id = lease.get("id")
+        if lease_id is not None and not isinstance(lease_id, dict):
+            raise RuntimeError("Unexpected lease id format in deployment data.")
+        provider_addr = lease_id.get("provider", "") if isinstance(lease_id, dict) else ""
         if provider_addr:
             self._provider_address = provider_addr
 
@@ -170,7 +173,14 @@ class LeaseShellTransport(Transport):
 
     def _get_proxy_ws_url(self) -> str:
         proxy = self._config.provider_proxy_url
-        return proxy.replace("https://", "wss://").replace("http://", "ws://")
+        parsed = urllib.parse.urlparse(proxy)
+        if parsed.scheme == "https":
+            scheme = "wss"
+        elif parsed.scheme == "http":
+            scheme = "ws"
+        else:
+            scheme = parsed.scheme
+        return urllib.parse.urlunparse(parsed._replace(scheme=scheme))
 
     @staticmethod
     def _dispatch_frame(frame: bytes) -> int | None:
@@ -192,7 +202,7 @@ class LeaseShellTransport(Transport):
                     pass
             try:
                 return int(json.loads(payload).get("exit_code", 0))
-            except (json.JSONDecodeError, TypeError, ValueError):
+            except (json.JSONDecodeError, TypeError, ValueError, AttributeError):
                 pass
             return 0
         elif code == 103:

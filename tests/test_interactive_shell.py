@@ -391,3 +391,17 @@ class TestLeaseShellConnect:
             mock_ws.return_value.__exit__.return_value = False
             t.connect()
         assert mock_tcsetattr.called, "termios.tcsetattr() was not called after ConnectionClosedOK"
+
+    def test_run_io_loop_continues_on_stdin_eof(self):
+        """When os.read returns b"" (EOF on stdin), _run_io_loop must not crash or hang."""
+        t = _make_transport()
+        ws = MagicMock()
+        ws.recv.return_value = bytes([102])
+
+        with (
+            patch("sys.stdin") as mock_stdin,
+            patch("select.select", return_value=([0], [], [])),
+            patch("os.read", return_value=b""),
+        ):
+            mock_stdin.fileno.return_value = 0
+            t._run_io_loop(ws)

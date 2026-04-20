@@ -321,3 +321,40 @@ def test_exec_second_jwt_different_from_first():
     assert captured_tokens[0] == "jwt-first"
     second_msg = json.loads(fake_ws_ok.sent_messages[0])
     assert second_msg["auth"]["token"] == "jwt-second"
+
+
+def test_exec_propagates_non_auth_runtime_error_from_jwt_fetch_on_retry():
+    """When _fetch_jwt() raises a non-auth RuntimeError after an auth-expiry reconnect,
+    it must propagate immediately — NOT retry and NOT raise 'Failed to re-authenticate'."""
+    config = TransportConfig(dseq="123", api_key="key", deployment=DEPLOYMENT_FIXTURE)
+    transport = LeaseShellTransport(config)
+    transport.prepare()
+
+    with (
+        patch.object(
+            transport,
+            "_fetch_jwt",
+            side_effect=["jwt-ok", RuntimeError("API error: 500 Internal Server Error")],
+        ),
+        patch("just_akash.transport.lease_shell.connect") as mock_connect,
+    ):
+
+        class FakeWSExpiry:
+            def recv(self, timeout=None):
+                raise make_close_error(4001)
+
+            def send(self, data):
+                pass
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *a):
+                pass
+
+        mock_connect.return_value = FakeWSExpiry()
+
+        with pytest.raises(RuntimeError, match="API error: 500 Internal Server Error"):
+            transport.exec("test")
+
+    assert mock_connect.call_count == 1
