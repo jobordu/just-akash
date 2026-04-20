@@ -2,19 +2,18 @@
 
 import io
 import json
-import pytest
-from unittest.mock import MagicMock, patch, call
+from unittest.mock import MagicMock, patch
 
-from websockets.exceptions import ConnectionClosedOK, ConnectionClosedError
+import pytest
+from websockets.exceptions import ConnectionClosedError, ConnectionClosedOK
 from websockets.frames import Close
 
+from just_akash.transport.base import TransportConfig
 from just_akash.transport.lease_shell import (
     LeaseShellTransport,
     _is_auth_expiry,
     _is_auth_expiry_message,
 )
-from just_akash.transport.base import TransportConfig
-
 
 # --- FakeWebSocket helper ---
 
@@ -30,7 +29,7 @@ class FakeWebSocket:
         try:
             return next(self._frames)
         except StopIteration:
-            raise ConnectionClosedOK(None, None)
+            raise ConnectionClosedOK(None, None) from None
 
     def send(self, data):
         self.sent_messages.append(data)
@@ -453,15 +452,17 @@ class TestExecHappyPath:
         transport = LeaseShellTransport(config)
         transport.prepare()
 
-        with patch.object(transport, "_fetch_jwt", return_value="jwt"):
-            with patch("just_akash.transport.lease_shell.connect") as mock_connect:
-                mock_connect.return_value = FakeWebSocket(
-                    [
-                        bytes([102]) + (0).to_bytes(4, "little"),
-                    ]
-                )
+        with (
+            patch.object(transport, "_fetch_jwt", return_value="jwt"),
+            patch("just_akash.transport.lease_shell.connect") as mock_connect,
+        ):
+            mock_connect.return_value = FakeWebSocket(
+                [
+                    bytes([102]) + (0).to_bytes(4, "little"),
+                ]
+            )
 
-                transport.exec("test")
+            transport.exec("test")
 
         call_args = mock_connect.call_args
         assert call_args.kwargs.get("compression") is None
@@ -474,23 +475,25 @@ class TestExecHappyPath:
         )
         transport = LeaseShellTransport(config)
 
-        with patch.object(transport, "_fetch_jwt", return_value="jwt"):
-            with patch.object(transport, "prepare") as mock_prepare:
-                with patch("just_akash.transport.lease_shell.connect") as mock_connect:
-                    mock_connect.return_value = FakeWebSocket(
-                        [
-                            bytes([102]) + (0).to_bytes(4, "little"),
-                        ]
-                    )
+        with (
+            patch.object(transport, "_fetch_jwt", return_value="jwt"),
+            patch.object(transport, "prepare") as mock_prepare,
+            patch("just_akash.transport.lease_shell.connect") as mock_connect,
+        ):
+            mock_connect.return_value = FakeWebSocket(
+                [
+                    bytes([102]) + (0).to_bytes(4, "little"),
+                ]
+            )
 
-                    mock_prepare.side_effect = lambda: (
-                        setattr(transport, "_service", "s")
-                        or setattr(transport, "_provider_host_uri", "https://x")
-                    )
+            mock_prepare.side_effect = lambda: (
+                setattr(transport, "_service", "s")
+                or setattr(transport, "_provider_host_uri", "https://x")
+            )
 
-                    transport.exec("cmd")
+            transport.exec("cmd")
 
-                mock_prepare.assert_called_once()
+        mock_prepare.assert_called_once()
 
 
 # --- validate() Tests ---
@@ -636,32 +639,34 @@ class TestTokenRefresh:
         transport = LeaseShellTransport(config)
         transport.prepare()
 
-        with patch.object(transport, "_fetch_jwt", return_value="jwt-token") as mock_fetch_jwt:
-            with patch("just_akash.transport.lease_shell.connect") as mock_connect:
+        with (
+            patch.object(transport, "_fetch_jwt", return_value="jwt-token") as mock_fetch_jwt,
+            patch("just_akash.transport.lease_shell.connect") as mock_connect,
+        ):
 
-                class FakeWSAuthExpiry:
-                    def recv(self, timeout=None):
-                        raise make_close_error(4001)
+            class FakeWSAuthExpiry:
+                def recv(self, timeout=None):
+                    raise make_close_error(4001)
 
-                    def send(self, data):
-                        pass
+                def send(self, data):
+                    pass
 
-                    def __enter__(self):
-                        return self
+                def __enter__(self):
+                    return self
 
-                    def __exit__(self, *a):
-                        pass
+                def __exit__(self, *a):
+                    pass
 
-                fake_ws_ok = FakeWebSocket(
-                    [
-                        bytes([100]) + b"output\n",
-                        bytes([102]) + (0).to_bytes(4, "little"),
-                    ]
-                )
+            fake_ws_ok = FakeWebSocket(
+                [
+                    bytes([100]) + b"output\n",
+                    bytes([102]) + (0).to_bytes(4, "little"),
+                ]
+            )
 
-                mock_connect.side_effect = [FakeWSAuthExpiry(), fake_ws_ok]
+            mock_connect.side_effect = [FakeWSAuthExpiry(), fake_ws_ok]
 
-                exit_code = transport.exec("test cmd")
+            exit_code = transport.exec("test cmd")
 
         assert exit_code == 0
         assert mock_fetch_jwt.call_count == 2
@@ -676,31 +681,33 @@ class TestTokenRefresh:
         transport = LeaseShellTransport(config)
         transport.prepare()
 
-        with patch.object(transport, "_fetch_jwt", return_value="jwt") as mock_fetch_jwt:
-            with patch("just_akash.transport.lease_shell.connect") as mock_connect:
+        with (
+            patch.object(transport, "_fetch_jwt", return_value="jwt") as mock_fetch_jwt,
+            patch("just_akash.transport.lease_shell.connect") as mock_connect,
+        ):
 
-                class FakeWSExpired:
-                    def recv(self, timeout=None):
-                        raise make_close_error(1000, "token expired")
+            class FakeWSExpired:
+                def recv(self, timeout=None):
+                    raise make_close_error(1000, "token expired")
 
-                    def send(self, data):
-                        pass
+                def send(self, data):
+                    pass
 
-                    def __enter__(self):
-                        return self
+                def __enter__(self):
+                    return self
 
-                    def __exit__(self, *a):
-                        pass
+                def __exit__(self, *a):
+                    pass
 
-                fake_ws_ok = FakeWebSocket(
-                    [
-                        bytes([102]) + (2).to_bytes(4, "little"),
-                    ]
-                )
+            fake_ws_ok = FakeWebSocket(
+                [
+                    bytes([102]) + (2).to_bytes(4, "little"),
+                ]
+            )
 
-                mock_connect.side_effect = [FakeWSExpired(), fake_ws_ok]
+            mock_connect.side_effect = [FakeWSExpired(), fake_ws_ok]
 
-                exit_code = transport.exec("test")
+            exit_code = transport.exec("test")
 
         assert exit_code == 2
         assert mock_fetch_jwt.call_count == 2
@@ -714,26 +721,28 @@ class TestTokenRefresh:
         transport = LeaseShellTransport(config)
         transport.prepare()
 
-        with patch.object(transport, "_fetch_jwt", return_value="jwt") as mock_fetch_jwt:
-            with patch("just_akash.transport.lease_shell.connect") as mock_connect:
+        with (
+            patch.object(transport, "_fetch_jwt", return_value="jwt") as mock_fetch_jwt,
+            patch("just_akash.transport.lease_shell.connect") as mock_connect,
+        ):
 
-                class FakeWSAuthExpiry:
-                    def recv(self, timeout=None):
-                        raise make_close_error(4001)
+            class FakeWSAuthExpiry:
+                def recv(self, timeout=None):
+                    raise make_close_error(4001)
 
-                    def send(self, data):
-                        pass
+                def send(self, data):
+                    pass
 
-                    def __enter__(self):
-                        return self
+                def __enter__(self):
+                    return self
 
-                    def __exit__(self, *a):
-                        pass
+                def __exit__(self, *a):
+                    pass
 
-                mock_connect.side_effect = [FakeWSAuthExpiry() for _ in range(10)]
+            mock_connect.side_effect = [FakeWSAuthExpiry() for _ in range(10)]
 
-                with pytest.raises(RuntimeError, match="Failed to re-authenticate"):
-                    transport.exec("test")
+            with pytest.raises(RuntimeError, match="Failed to re-authenticate"):
+                transport.exec("test")
 
         from just_akash.transport.lease_shell import MAX_RECONNECT_ATTEMPTS
 
@@ -748,26 +757,28 @@ class TestTokenRefresh:
         transport = LeaseShellTransport(config)
         transport.prepare()
 
-        with patch.object(transport, "_fetch_jwt", return_value="jwt") as mock_fetch_jwt:
-            with patch("just_akash.transport.lease_shell.connect") as mock_connect:
+        with (
+            patch.object(transport, "_fetch_jwt", return_value="jwt") as mock_fetch_jwt,
+            patch("just_akash.transport.lease_shell.connect") as mock_connect,
+        ):
 
-                class FakeWSAbnormal:
-                    def recv(self, timeout=None):
-                        raise make_close_error(1006)
+            class FakeWSAbnormal:
+                def recv(self, timeout=None):
+                    raise make_close_error(1006)
 
-                    def send(self, data):
-                        pass
+                def send(self, data):
+                    pass
 
-                    def __enter__(self):
-                        return self
+                def __enter__(self):
+                    return self
 
-                    def __exit__(self, *a):
-                        pass
+                def __exit__(self, *a):
+                    pass
 
-                mock_connect.return_value = FakeWSAbnormal()
+            mock_connect.return_value = FakeWSAbnormal()
 
-                with pytest.raises(ConnectionClosedError):
-                    transport.exec("test")
+            with pytest.raises(ConnectionClosedError):
+                transport.exec("test")
 
         assert mock_fetch_jwt.call_count == 1
         assert mock_connect.call_count == 1

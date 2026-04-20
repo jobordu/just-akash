@@ -1,16 +1,16 @@
 """Unit tests for just_akash.transport package."""
 
-import pytest
 from unittest.mock import MagicMock, patch
 
+import pytest
+
 from just_akash.transport import (
+    LeaseShellTransport,
+    SSHTransport,
     Transport,
     TransportConfig,
-    SSHTransport,
-    LeaseShellTransport,
     make_transport,
 )
-
 
 # --- Transport ABC ---
 
@@ -75,9 +75,11 @@ class TestSSHTransport:
         dep = self._make_deployment_with_ssh()
         config = TransportConfig(dseq="123", api_key="key", deployment=dep)
         t = SSHTransport(config)
-        with patch("just_akash.transport.ssh._find_ssh_key", return_value=None):
-            with pytest.raises(RuntimeError, match="No SSH key"):
-                t.prepare()
+        with (
+            patch("just_akash.transport.ssh._find_ssh_key", return_value=None),
+            pytest.raises(RuntimeError, match="No SSH key"),
+        ):
+            t.prepare()
 
     def test_exec_runs_command_and_returns_exit_code(self):
         dep = self._make_deployment_with_ssh()
@@ -90,9 +92,11 @@ class TestSSHTransport:
         mock_result = MagicMock()
         mock_result.returncode = 0
 
-        with patch("just_akash.transport.ssh._build_ssh_cmd", return_value=["ssh", "-p", "32022"]):
-            with patch("just_akash.transport.ssh.subprocess.run", return_value=mock_result):
-                rc = t.exec("echo hello")
+        with (
+            patch("just_akash.transport.ssh._build_ssh_cmd", return_value=["ssh", "-p", "32022"]),
+            patch("just_akash.transport.ssh.subprocess.run", return_value=mock_result),
+        ):
+            rc = t.exec("echo hello")
         assert rc == 0
 
     def test_exec_propagates_nonzero_exit_code(self):
@@ -103,9 +107,11 @@ class TestSSHTransport:
         mock_result = MagicMock()
         mock_result.returncode = 42
 
-        with patch("just_akash.transport.ssh._build_ssh_cmd", return_value=["ssh"]):
-            with patch("just_akash.transport.ssh.subprocess.run", return_value=mock_result):
-                rc = t.exec("exit 42")
+        with (
+            patch("just_akash.transport.ssh._build_ssh_cmd", return_value=["ssh"]),
+            patch("just_akash.transport.ssh.subprocess.run", return_value=mock_result),
+        ):
+            rc = t.exec("exit 42")
         assert rc == 42
 
 
@@ -167,7 +173,7 @@ class TestLeaseShellTransportStub:
         t._service = "web"
 
         with (
-            patch("just_akash.transport.lease_shell.connect") as mock_ws_connect,
+            patch("just_akash.transport.lease_shell.connect"),
             patch("termios.tcgetattr", return_value=[]),
             patch("termios.tcsetattr"),
             patch("tty.setraw"),

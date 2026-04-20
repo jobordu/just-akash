@@ -1,0 +1,14 @@
+{
+  "version": "1.0",
+  "entries": [
+    {
+      "bug_id": "bbab0b8e",
+      "description": "Extend LeaseShellTransport.exec() to silently re-authenticate and reconnect when the provider closes the WebSocket due to JWT expiry",
+      "failure_context": "exec() lines 199-200 catches ConnectionClosedError with bare break, no reconnect logic",
+      "timestamp": "2026-04-19T11:25:01.480Z",
+      "status": "no_coverage",
+      "worker_consensus_root_cause": "exec() catches ConnectionClosedError and breaks without JWT refresh",
+      "worker_consensus_next_step": "Inspect just_akash/transport/lease_shell.py lines 162-205 before implementing _exec_with_refresh()"
+    }
+  ]
+}

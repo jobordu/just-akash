@@ -78,10 +78,10 @@ class TestLeaseShellConnect:
             mock_stdin.isatty.return_value = True
             mock_stdin.fileno.return_value = 0
             ws_instance = MagicMock()
-            ws_instance.recv.side_effect = Exception("stop")
+            ws_instance.recv.side_effect = RuntimeError("stop")
             mock_ws.return_value.__enter__.return_value = ws_instance
             mock_ws.return_value.__exit__.return_value = False
-            with pytest.raises(Exception):
+            with pytest.raises(RuntimeError):
                 t.connect()
             first_send = ws_instance.send.call_args_list[0].args[0]
             connect_msg = json.loads(first_send)
@@ -105,10 +105,10 @@ class TestLeaseShellConnect:
             mock_stdin.isatty.return_value = True
             mock_stdin.fileno.return_value = 0
             ws_instance = MagicMock()
-            ws_instance.recv.side_effect = Exception("stop")
+            ws_instance.recv.side_effect = RuntimeError("stop")
             mock_ws.return_value.__enter__.return_value = ws_instance
             mock_ws.return_value.__exit__.return_value = False
-            with pytest.raises(Exception):
+            with pytest.raises(RuntimeError):
                 t.connect()
             sent_frames = _decode_proxy_send(ws_instance.send.call_args_list)
             resize_frames = [f for f in sent_frames if f[0] == 105]
@@ -138,10 +138,10 @@ class TestLeaseShellConnect:
             mock_select.side_effect = [([0], [], []), Exception("stop")]
             mock_os_read.return_value = stdin_data
             ws_instance = MagicMock()
-            ws_instance.recv.side_effect = Exception("no recv")
+            ws_instance.recv.side_effect = RuntimeError("no recv")
             mock_ws.return_value.__enter__.return_value = ws_instance
             mock_ws.return_value.__exit__.return_value = False
-            with pytest.raises(Exception):
+            with pytest.raises(RuntimeError):
                 t.connect()
             sent_frames = _decode_proxy_send(ws_instance.send.call_args_list)
             stdin_frames = [f for f in sent_frames if f[0] == 104]
@@ -167,10 +167,10 @@ class TestLeaseShellConnect:
             mock_stdin.isatty.return_value = True
             mock_stdin.fileno.return_value = 0
             ws_instance = MagicMock()
-            ws_instance.recv.side_effect = [bytes([100]) + b"output", Exception("stop")]
+            ws_instance.recv.side_effect = [bytes([100]) + b"output", RuntimeError("stop")]
             mock_ws.return_value.__enter__.return_value = ws_instance
             mock_ws.return_value.__exit__.return_value = False
-            with pytest.raises(Exception):
+            with pytest.raises(RuntimeError):
                 t.connect()
             mock_stdout.buffer.write.assert_any_call(b"output")
 
@@ -192,10 +192,10 @@ class TestLeaseShellConnect:
             mock_stdin.isatty.return_value = True
             mock_stdin.fileno.return_value = 0
             ws_instance = MagicMock()
-            ws_instance.recv.side_effect = [bytes([101]) + b"err", Exception("stop")]
+            ws_instance.recv.side_effect = [bytes([101]) + b"err", RuntimeError("stop")]
             mock_ws.return_value.__enter__.return_value = ws_instance
             mock_ws.return_value.__exit__.return_value = False
-            with pytest.raises(Exception):
+            with pytest.raises(RuntimeError):
                 t.connect()
             mock_stderr.buffer.write.assert_any_call(b"err")
 

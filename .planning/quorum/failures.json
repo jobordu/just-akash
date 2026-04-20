@@ -1,0 +1,30 @@
+[
+  {
+    "slot": "gemini-1",
+    "error_type": "SPAWN_ERROR",
+    "pattern": "[spawn error: The \"file\" argument must be of type string. Received null]",
+    "count": 1,
+    "last_seen": "2026-04-19T11:23:40.541Z"
+  },
+  {
+    "slot": "opencode-1",
+    "error_type": "SPAWN_ERROR",
+    "pattern": "[spawn error: The \"file\" argument must be of type string. Received null]",
+    "count": 1,
+    "last_seen": "2026-04-19T11:23:41.035Z"
+  },
+  {
+    "slot": "copilot-1",
+    "error_type": "SPAWN_ERROR",
+    "pattern": "[spawn error: The \"file\" argument must be of type string. Received null]",
+    "count": 1,
+    "last_seen": "2026-04-19T11:23:41.460Z"
+  },
+  {
+    "slot": "codex-1",
+    "error_type": "SPAWN_ERROR",
+    "pattern": "[spawn error: The \"file\" argument must be of type string. Received null]",
+    "count": 1,
+    "last_seen": "2026-04-19T11:23:41.963Z"
+  }
+]

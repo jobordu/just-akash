@@ -2,7 +2,7 @@
 
 import base64
 import shlex
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 import pytest
 
@@ -77,23 +77,29 @@ class TestLeaseShellTransportInject:
     def test_inject_raises_on_mkdir_failure(self):
         """inject() raises RuntimeError if mkdir exec() returns non-zero."""
         t = _make_transport()
-        with patch.object(t, "exec", return_value=1):
-            with pytest.raises(RuntimeError, match="Failed to create directory"):
-                t.inject("/tmp/secrets.env", "KEY=value")
+        with (
+            patch.object(t, "exec", return_value=1),
+            pytest.raises(RuntimeError, match="Failed to create directory"),
+        ):
+            t.inject("/tmp/secrets.env", "KEY=value")
 
     def test_inject_raises_on_write_failure(self):
         """inject() raises RuntimeError if write exec() returns non-zero."""
         t = _make_transport()
-        with patch.object(t, "exec", side_effect=[0, 1, 0]):
-            with pytest.raises(RuntimeError, match="Failed to write"):
-                t.inject("/tmp/secrets.env", "KEY=value")
+        with (
+            patch.object(t, "exec", side_effect=[0, 1, 0]),
+            pytest.raises(RuntimeError, match="Failed to write"),
+        ):
+            t.inject("/tmp/secrets.env", "KEY=value")
 
     def test_inject_raises_on_chmod_failure(self):
         """inject() raises RuntimeError if chmod exec() returns non-zero."""
         t = _make_transport()
-        with patch.object(t, "exec", side_effect=[0, 0, 1]):
-            with pytest.raises(RuntimeError, match="Failed to set permissions"):
-                t.inject("/tmp/secrets.env", "KEY=value")
+        with (
+            patch.object(t, "exec", side_effect=[0, 0, 1]),
+            pytest.raises(RuntimeError, match="Failed to set permissions"),
+        ):
+            t.inject("/tmp/secrets.env", "KEY=value")
 
     def test_inject_escapes_path_with_shell_metacharacters(self):
         """inject() uses shlex.quote() so metacharacters in remote_path are safe."""
