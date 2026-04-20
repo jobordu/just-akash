@@ -8,22 +8,32 @@ from unittest.mock import MagicMock, patch, call
 from websockets.exceptions import ConnectionClosedOK, ConnectionClosedError
 from websockets.frames import Close
 
-from just_akash.transport.lease_shell import LeaseShellTransport, _is_auth_expiry, _is_auth_expiry_message
+from just_akash.transport.lease_shell import (
+    LeaseShellTransport,
+    _is_auth_expiry,
+    _is_auth_expiry_message,
+)
 from just_akash.transport.base import TransportConfig
 
 
 # --- FakeWebSocket helper ---
 
+
 class FakeWebSocket:
     """Minimal WebSocket mock that serves pre-built frames then closes."""
+
     def __init__(self, frames):
         self._frames = iter(frames)
+        self.sent_messages: list = []
 
     def recv(self, timeout=None):
         try:
             return next(self._frames)
         except StopIteration:
             raise ConnectionClosedOK(None, None)
+
+    def send(self, data):
+        self.sent_messages.append(data)
 
     def __enter__(self):
         return self
@@ -44,14 +54,17 @@ def make_close_error(code: int, reason: str = "") -> ConnectionClosedError:
 # --- Fixtures ---
 
 DEPLOYMENT_FIXTURE = {
-    "leases": [{
-        "provider": {"hostUri": "https://provider.us-east.akash.pub:8443"},
-        "status": {"services": {"web": {"ready_replicas": 1, "total": 1}}},
-    }]
+    "leases": [
+        {
+            "provider": {"hostUri": "https://provider.us-east.akash.pub:8443"},
+            "status": {"services": {"web": {"ready_replicas": 1, "total": 1}}},
+        }
+    ]
 }
 
 
 # --- JWT Fetch Tests ---
+
 
 class TestJWTFetch:
     """Test _fetch_jwt() and AkashConsoleAPI.create_jwt() integration."""
@@ -65,9 +78,7 @@ class TestJWTFetch:
         )
         transport = LeaseShellTransport(config)
 
-        with patch.object(
-            transport, "_get_api_client"
-        ) as mock_get_api:
+        with patch.object(transport, "_get_api_client") as mock_get_api:
             mock_api = MagicMock()
             mock_api.create_jwt.return_value = "jwt-token-abc123"
             mock_get_api.return_value = mock_api
@@ -115,11 +126,11 @@ class TestJWTFetch:
 
 # --- Provider URL Extraction Tests ---
 
-class TestProviderURLExtraction:
-    """Test _extract_provider_url() and related methods."""
 
-    def test_extract_provider_url_happy_path(self):
-        """Test _extract_provider_url() returns correct (ws_base, service)."""
+class TestProviderInfoExtraction:
+    """Test _extract_provider_info() and related methods."""
+
+    def test_extract_provider_info_happy_path(self):
         config = TransportConfig(
             dseq="999",
             api_key="key",
@@ -128,49 +139,50 @@ class TestProviderURLExtraction:
         )
         transport = LeaseShellTransport(config)
 
-        ws_base, service = transport._extract_provider_url()
+        host_uri, service = transport._extract_provider_info()
 
-        assert ws_base == "wss://provider.us-east.akash.pub:8443"
+        assert host_uri == "https://provider.us-east.akash.pub:8443"
         assert service == "web"
 
-    def test_extract_provider_url_https_to_wss_conversion(self):
-        """Test HTTPS → WSS protocol conversion."""
+    def test_extract_provider_info_https_preserved(self):
         config = TransportConfig(
             dseq="1",
             api_key="k",
             deployment={
-                "leases": [{
-                    "provider": {"hostUri": "https://example.com:9000"},
-                    "status": {"services": {"api": {}}},
-                }]
+                "leases": [
+                    {
+                        "provider": {"hostUri": "https://example.com:9000"},
+                        "status": {"services": {"api": {}}},
+                    }
+                ]
             },
         )
         transport = LeaseShellTransport(config)
 
-        ws_base, service = transport._extract_provider_url()
+        host_uri, service = transport._extract_provider_info()
 
-        assert ws_base == "wss://example.com:9000"
+        assert host_uri == "https://example.com:9000"
 
-    def test_extract_provider_url_http_to_ws_conversion(self):
-        """Test HTTP → WS protocol conversion."""
+    def test_extract_provider_info_http_preserved(self):
         config = TransportConfig(
             dseq="2",
             api_key="k",
             deployment={
-                "leases": [{
-                    "provider": {"hostUri": "http://localhost:8080"},
-                    "status": {"services": {"service1": {}}},
-                }]
+                "leases": [
+                    {
+                        "provider": {"hostUri": "http://localhost:8080"},
+                        "status": {"services": {"service1": {}}},
+                    }
+                ]
             },
         )
         transport = LeaseShellTransport(config)
 
-        ws_base, service = transport._extract_provider_url()
+        host_uri, service = transport._extract_provider_info()
 
-        assert ws_base == "ws://localhost:8080"
+        assert host_uri == "http://localhost:8080"
 
-    def test_extract_provider_url_no_leases(self):
-        """Test _extract_provider_url() raises RuntimeError when no leases."""
+    def test_extract_provider_info_no_leases(self):
         config = TransportConfig(
             dseq="123",
             api_key="key",
@@ -179,63 +191,67 @@ class TestProviderURLExtraction:
         transport = LeaseShellTransport(config)
 
         with pytest.raises(RuntimeError, match="No leases found"):
-            transport._extract_provider_url()
+            transport._extract_provider_info()
 
-    def test_extract_provider_url_missing_hostUri(self):
-        """Test _extract_provider_url() raises RuntimeError when hostUri missing."""
+    def test_extract_provider_info_missing_hostUri(self):
         config = TransportConfig(
             dseq="123",
             api_key="key",
             deployment={
-                "leases": [{
-                    "provider": {},  # No hostUri
-                    "status": {"services": {"web": {}}},
-                }]
+                "leases": [
+                    {
+                        "provider": {},
+                        "status": {"services": {"web": {}}},
+                    }
+                ]
             },
         )
         transport = LeaseShellTransport(config)
 
         with pytest.raises(RuntimeError, match="Provider hostUri not found"):
-            transport._extract_provider_url()
+            transport._extract_provider_info()
 
-    def test_extract_provider_url_host_uri_snake_case_fallback(self):
-        """Test _extract_provider_url() falls back to host_uri (snake_case)."""
+    def test_extract_provider_info_host_uri_snake_case_fallback(self):
         config = TransportConfig(
             dseq="123",
             api_key="key",
             deployment={
-                "leases": [{
-                    "provider": {"host_uri": "https://snake-case.example.com"},  # snake_case
-                    "status": {"services": {"app": {}}},
-                }]
+                "leases": [
+                    {
+                        "provider": {"host_uri": "https://snake-case.example.com"},
+                        "status": {"services": {"app": {}}},
+                    }
+                ]
             },
         )
         transport = LeaseShellTransport(config)
 
-        ws_base, service = transport._extract_provider_url()
+        host_uri, service = transport._extract_provider_info()
 
-        assert ws_base == "wss://snake-case.example.com"
+        assert host_uri == "https://snake-case.example.com"
 
-    def test_extract_provider_url_missing_service_name(self):
-        """Test _extract_provider_url() raises RuntimeError when service cannot be determined."""
+    def test_extract_provider_info_missing_service_name(self):
         config = TransportConfig(
             dseq="123",
             api_key="key",
             deployment={
-                "leases": [{
-                    "provider": {"hostUri": "https://provider.com"},
-                    "status": {"services": {}},  # Empty services
-                }]
+                "leases": [
+                    {
+                        "provider": {"hostUri": "https://provider.com"},
+                        "status": {"services": {}},
+                    }
+                ]
             },
-            service_name=None,  # And no explicit service_name
+            service_name=None,
         )
         transport = LeaseShellTransport(config)
 
         with pytest.raises(RuntimeError, match="Cannot determine service name"):
-            transport._extract_provider_url()
+            transport._extract_provider_info()
 
 
 # --- Frame Dispatch Tests ---
+
 
 class TestFrameDispatch:
     """Test _dispatch_frame() handles all frame codes correctly."""
@@ -328,43 +344,38 @@ class TestFrameDispatch:
 
 # --- exec() Happy Path Tests ---
 
+
 class TestExecHappyPath:
     """Test exec() end-to-end with mocked WebSocket."""
 
     def test_exec_happy_path_stdout_only(self):
-        """Test exec() captures stdout and returns exit code."""
         config = TransportConfig(
             dseq="123",
             api_key="key",
             deployment=DEPLOYMENT_FIXTURE,
         )
         transport = LeaseShellTransport(config)
-
-        # Prepare first
         transport.prepare()
 
-        # Mock JWT fetch
         with patch.object(transport, "_fetch_jwt", return_value="test-jwt"):
-            # Mock WebSocket with stdout then exit code
             frames = [
                 bytes([100]) + b"output\n",
                 bytes([102]) + (0).to_bytes(4, "little"),
             ]
 
             with patch("just_akash.transport.lease_shell.connect") as mock_connect:
-                mock_connect.return_value = FakeWebSocket(frames)
+                fake_ws = FakeWebSocket(frames)
+                mock_connect.return_value = fake_ws
 
                 exit_code = transport.exec("echo hello")
 
         assert exit_code == 0
         mock_connect.assert_called_once()
-        call_args = mock_connect.call_args
-        # Check URL contains command
-        assert "cmd=" in call_args[0][0]
-        assert "echo+hello" in call_args[0][0]
+        connect_msg = json.loads(fake_ws.sent_messages[0])
+        assert "cmd=" in connect_msg["url"]
+        assert "echo+hello" in connect_msg["url"]
 
     def test_exec_captures_stderr(self):
-        """Test exec() captures both stdout and stderr."""
         config = TransportConfig(
             dseq="123",
             api_key="key",
@@ -388,7 +399,6 @@ class TestExecHappyPath:
         assert exit_code == 0
 
     def test_exec_non_zero_exit_code(self):
-        """Test exec() returns non-zero exit code from remote command."""
         config = TransportConfig(
             dseq="456",
             api_key="key",
@@ -410,8 +420,7 @@ class TestExecHappyPath:
 
         assert exit_code == 127
 
-    def test_exec_jwt_bearer_token_in_headers(self):
-        """Test exec() includes JWT in Authorization header."""
+    def test_exec_jwt_sent_in_connect_message(self):
         config = TransportConfig(
             dseq="123",
             api_key="key",
@@ -426,16 +435,16 @@ class TestExecHappyPath:
             ]
 
             with patch("just_akash.transport.lease_shell.connect") as mock_connect:
-                mock_connect.return_value = FakeWebSocket(frames)
+                fake_ws = FakeWebSocket(frames)
+                mock_connect.return_value = fake_ws
 
                 transport.exec("test")
 
-        call_args = mock_connect.call_args
-        additional_headers = call_args.kwargs.get("additional_headers", {})
-        assert additional_headers.get("Authorization") == "Bearer token-xyz"
+        connect_msg = json.loads(fake_ws.sent_messages[0])
+        assert connect_msg["auth"]["type"] == "jwt"
+        assert connect_msg["auth"]["token"] == "token-xyz"
 
     def test_exec_compression_disabled(self):
-        """Test exec() disables compression for provider compatibility."""
         config = TransportConfig(
             dseq="123",
             api_key="key",
@@ -446,9 +455,11 @@ class TestExecHappyPath:
 
         with patch.object(transport, "_fetch_jwt", return_value="jwt"):
             with patch("just_akash.transport.lease_shell.connect") as mock_connect:
-                mock_connect.return_value = FakeWebSocket([
-                    bytes([102]) + (0).to_bytes(4, "little"),
-                ])
+                mock_connect.return_value = FakeWebSocket(
+                    [
+                        bytes([102]) + (0).to_bytes(4, "little"),
+                    ]
+                )
 
                 transport.exec("test")
 
@@ -456,24 +467,26 @@ class TestExecHappyPath:
         assert call_args.kwargs.get("compression") is None
 
     def test_exec_auto_prepare(self):
-        """Test exec() calls prepare() if ws_url not yet set."""
         config = TransportConfig(
             dseq="999",
             api_key="key",
             deployment=DEPLOYMENT_FIXTURE,
         )
         transport = LeaseShellTransport(config)
-        # NOT calling prepare() before exec()
 
         with patch.object(transport, "_fetch_jwt", return_value="jwt"):
             with patch.object(transport, "prepare") as mock_prepare:
                 with patch("just_akash.transport.lease_shell.connect") as mock_connect:
-                    mock_connect.return_value = FakeWebSocket([
-                        bytes([102]) + (0).to_bytes(4, "little"),
-                    ])
+                    mock_connect.return_value = FakeWebSocket(
+                        [
+                            bytes([102]) + (0).to_bytes(4, "little"),
+                        ]
+                    )
 
-                    # First prepare() will be auto-called; mock it to avoid real extraction
-                    mock_prepare.side_effect = lambda: setattr(transport, "_ws_url", "wss://x") or setattr(transport, "_service", "s")
+                    mock_prepare.side_effect = lambda: (
+                        setattr(transport, "_service", "s")
+                        or setattr(transport, "_provider_host_uri", "https://x")
+                    )
 
                     transport.exec("cmd")
 
@@ -481,6 +494,7 @@ class TestExecHappyPath:
 
 
 # --- validate() Tests ---
+
 
 class TestValidate:
     """Test validate() method."""
@@ -502,9 +516,11 @@ class TestValidate:
             dseq="123",
             api_key="key",
             deployment={
-                "leases": [{
-                    "provider": {"host_uri": "https://example.com"},
-                }]
+                "leases": [
+                    {
+                        "provider": {"host_uri": "https://example.com"},
+                    }
+                ]
             },
         )
         transport = LeaseShellTransport(config)
@@ -528,9 +544,11 @@ class TestValidate:
             dseq="123",
             api_key="key",
             deployment={
-                "leases": [{
-                    "provider": {},  # No hostUri
-                }]
+                "leases": [
+                    {
+                        "provider": {},  # No hostUri
+                    }
+                ]
             },
         )
         transport = LeaseShellTransport(config)
@@ -543,9 +561,11 @@ class TestValidate:
             dseq="123",
             api_key="key",
             deployment={
-                "leases": [{
-                    "provider": "not-a-dict",
-                }]
+                "leases": [
+                    {
+                        "provider": "not-a-dict",
+                    }
+                ]
             },
         )
         transport = LeaseShellTransport(config)
@@ -555,54 +575,59 @@ class TestValidate:
 
 # --- NotImplemented Methods ---
 
+
 class TestNotImplementedMethods:
     """Test that connect() raises NotImplementedError (inject() is implemented in Phase 8)."""
 
     def test_inject_implemented_phase_8(self):
-        """Phase 8: inject() is now implemented — no longer raises NotImplementedError."""
         config = TransportConfig(
             dseq="123",
             api_key="key",
             deployment={
-                "leases": [{
-                    "provider": {"hostUri": "https://provider.example.com:8443"},
-                    "status": {"services": {"web": {}}},
-                }]
+                "leases": [
+                    {
+                        "provider": {"hostUri": "https://provider.example.com:8443"},
+                        "status": {"services": {"web": {}}},
+                    }
+                ]
             },
         )
         transport = LeaseShellTransport(config)
-        transport._ws_url = "wss://provider.example.com:8443/lease/123/1/1/shell"
+        transport._provider_host_uri = "https://provider.example.com:8443"
         transport._service = "web"
         from unittest.mock import patch
+
         with patch.object(transport, "exec", side_effect=[0, 0, 0]):
-            transport.inject("/tmp/file", "content")  # Must NOT raise
+            transport.inject("/tmp/file", "content")
 
     def test_connect_does_not_raise_not_implemented(self):
-        """Phase 9: connect() is implemented — NotImplementedError stub is gone."""
         from unittest.mock import patch as _patch
+
         config = TransportConfig(dseq="123", api_key="key")
         transport = LeaseShellTransport(config)
-        transport._ws_url = "wss://provider.example.com/lease/123/1/1/shell"
+        transport._provider_host_uri = "https://provider.example.com"
         transport._service = "web"
-        # connect() requires TTY; patch dependencies to avoid TTY errors in CI
-        with _patch("just_akash.transport.lease_shell.LeaseShellTransport._run_interactive_session"), \
-             _patch("termios.tcgetattr", return_value=[]), \
-             _patch("termios.tcsetattr"), \
-             _patch("tty.setraw"), \
-             _patch("sys.stdin") as mock_stdin:
+        with (
+            _patch(
+                "just_akash.transport.lease_shell.LeaseShellTransport._run_interactive_session"
+            ),
+            _patch("termios.tcgetattr", return_value=[]),
+            _patch("termios.tcsetattr"),
+            _patch("tty.setraw"),
+            _patch("sys.stdin") as mock_stdin,
+        ):
             mock_stdin.isatty.return_value = True
             mock_stdin.fileno.return_value = 0
-            # Should not raise NotImplementedError
             transport.connect()
 
 
 # --- Token Refresh Tests ---
 
+
 class TestTokenRefresh:
     """Test token-expiry reconnect logic in exec()."""
 
     def test_exec_reconnects_on_token_expiry(self):
-        """Test exec() reconnects on ConnectionClosedError with close code 4001."""
         config = TransportConfig(
             dseq="123",
             api_key="key",
@@ -612,35 +637,37 @@ class TestTokenRefresh:
         transport.prepare()
 
         with patch.object(transport, "_fetch_jwt", return_value="jwt-token") as mock_fetch_jwt:
-            # Simulate two connect() calls: first raises 4001, second succeeds
             with patch("just_akash.transport.lease_shell.connect") as mock_connect:
-                # First call: raise auth expiry
+
                 class FakeWSAuthExpiry:
                     def recv(self, timeout=None):
                         raise make_close_error(4001)
+
+                    def send(self, data):
+                        pass
+
                     def __enter__(self):
                         return self
+
                     def __exit__(self, *a):
                         pass
 
-                # Second call: succeed with output and exit code
-                fake_ws_ok = FakeWebSocket([
-                    bytes([100]) + b"output\n",
-                    bytes([102]) + (0).to_bytes(4, "little"),
-                ])
+                fake_ws_ok = FakeWebSocket(
+                    [
+                        bytes([100]) + b"output\n",
+                        bytes([102]) + (0).to_bytes(4, "little"),
+                    ]
+                )
 
                 mock_connect.side_effect = [FakeWSAuthExpiry(), fake_ws_ok]
 
                 exit_code = transport.exec("test cmd")
 
         assert exit_code == 0
-        # Should have called _fetch_jwt twice (initial + after expiry)
         assert mock_fetch_jwt.call_count == 2
-        # Should have called connect twice
         assert mock_connect.call_count == 2
 
     def test_exec_reconnects_on_expired_message(self):
-        """Test exec() reconnects when close reason contains 'expired'."""
         config = TransportConfig(
             dseq="123",
             api_key="key",
@@ -651,19 +678,25 @@ class TestTokenRefresh:
 
         with patch.object(transport, "_fetch_jwt", return_value="jwt") as mock_fetch_jwt:
             with patch("just_akash.transport.lease_shell.connect") as mock_connect:
-                # First call: raise with reason "token expired"
+
                 class FakeWSExpired:
                     def recv(self, timeout=None):
                         raise make_close_error(1000, "token expired")
+
+                    def send(self, data):
+                        pass
+
                     def __enter__(self):
                         return self
+
                     def __exit__(self, *a):
                         pass
 
-                # Second call: succeed with exit code 2
-                fake_ws_ok = FakeWebSocket([
-                    bytes([102]) + (2).to_bytes(4, "little"),
-                ])
+                fake_ws_ok = FakeWebSocket(
+                    [
+                        bytes([102]) + (2).to_bytes(4, "little"),
+                    ]
+                )
 
                 mock_connect.side_effect = [FakeWSExpired(), fake_ws_ok]
 
@@ -673,7 +706,6 @@ class TestTokenRefresh:
         assert mock_fetch_jwt.call_count == 2
 
     def test_exec_raises_after_max_reconnect_attempts(self):
-        """Test exec() raises RuntimeError after MAX_RECONNECT_ATTEMPTS failures."""
         config = TransportConfig(
             dseq="123",
             api_key="key",
@@ -684,12 +716,17 @@ class TestTokenRefresh:
 
         with patch.object(transport, "_fetch_jwt", return_value="jwt") as mock_fetch_jwt:
             with patch("just_akash.transport.lease_shell.connect") as mock_connect:
-                # All attempts fail with auth expiry
+
                 class FakeWSAuthExpiry:
                     def recv(self, timeout=None):
                         raise make_close_error(4001)
+
+                    def send(self, data):
+                        pass
+
                     def __enter__(self):
                         return self
+
                     def __exit__(self, *a):
                         pass
 
@@ -698,12 +735,11 @@ class TestTokenRefresh:
                 with pytest.raises(RuntimeError, match="Failed to re-authenticate"):
                     transport.exec("test")
 
-        # Should have attempted exactly MAX_RECONNECT_ATTEMPTS times
         from just_akash.transport.lease_shell import MAX_RECONNECT_ATTEMPTS
+
         assert mock_fetch_jwt.call_count == MAX_RECONNECT_ATTEMPTS
 
     def test_exec_non_auth_close_propagates(self):
-        """Test exec() propagates non-auth ConnectionClosedError without retrying."""
         config = TransportConfig(
             dseq="123",
             api_key="key",
@@ -714,12 +750,17 @@ class TestTokenRefresh:
 
         with patch.object(transport, "_fetch_jwt", return_value="jwt") as mock_fetch_jwt:
             with patch("just_akash.transport.lease_shell.connect") as mock_connect:
-                # Abnormal close (code 1006) — should propagate, not retry
+
                 class FakeWSAbnormal:
                     def recv(self, timeout=None):
-                        raise make_close_error(1006)  # Abnormal close, not auth
+                        raise make_close_error(1006)
+
+                    def send(self, data):
+                        pass
+
                     def __enter__(self):
                         return self
+
                     def __exit__(self, *a):
                         pass
 
@@ -728,9 +769,7 @@ class TestTokenRefresh:
                 with pytest.raises(ConnectionClosedError):
                     transport.exec("test")
 
-        # Should have only called _fetch_jwt once (no retry)
         assert mock_fetch_jwt.call_count == 1
-        # Should have only called connect once
         assert mock_connect.call_count == 1
 
     def test_is_auth_expiry_message(self):

@@ -14,6 +14,7 @@ from just_akash.transport import (
 
 # --- Transport ABC ---
 
+
 class TestTransportABC:
     def test_transport_cannot_be_instantiated_directly(self):
         """Transport is abstract — direct instantiation must raise TypeError."""
@@ -31,6 +32,7 @@ class TestTransportABC:
 
 # --- SSHTransport ---
 
+
 class TestSSHTransport:
     def _make_deployment_with_ssh(self):
         """Minimal deployment dict that _extract_ssh_info can parse."""
@@ -40,7 +42,11 @@ class TestSSHTransport:
                     "status": {
                         "forwarded_ports": {
                             "app": [
-                                {"port": 22, "host": "provider.akash.network", "externalPort": 32022}
+                                {
+                                    "port": 22,
+                                    "host": "provider.akash.network",
+                                    "externalPort": 32022,
+                                }
                             ]
                         }
                     }
@@ -105,6 +111,7 @@ class TestSSHTransport:
 
 # --- LeaseShellTransport (Phase 7+) ---
 
+
 class TestLeaseShellTransportStub:
     def _stub_no_deployment(self):
         """Lease shell transport without deployment data."""
@@ -117,10 +124,12 @@ class TestLeaseShellTransportStub:
             dseq="123",
             api_key="key",
             deployment={
-                "leases": [{
-                    "provider": {"hostUri": "https://provider.example.com"},
-                    "status": {"services": {"web": {}}},
-                }]
+                "leases": [
+                    {
+                        "provider": {"hostUri": "https://provider.example.com"},
+                        "status": {"services": {"web": {}}},
+                    }
+                ]
             },
         )
         return LeaseShellTransport(config)
@@ -134,7 +143,7 @@ class TestLeaseShellTransportStub:
         """Phase 7: prepare() works with valid deployment data."""
         t = self._stub_with_deployment()
         t.prepare()
-        assert t._ws_url is not None
+        assert t._provider_host_uri is not None
         assert t._service is not None
 
     def test_exec_raises_when_no_deployment(self):
@@ -145,7 +154,7 @@ class TestLeaseShellTransportStub:
     def test_lease_shell_inject_not_a_stub(self):
         """Phase 8: inject() is implemented (no longer NotImplementedError)."""
         t = self._stub_with_deployment()
-        t._ws_url = "wss://p:8443/lease/1/1/1/shell"
+        t._provider_host_uri = "https://p:8443"
         t._service = "web"
         with patch.object(t, "exec", side_effect=[0, 0, 0]):
             # Should NOT raise NotImplementedError
@@ -154,15 +163,17 @@ class TestLeaseShellTransportStub:
     def test_lease_shell_connect_opens_session(self):
         """Phase 9: connect() is implemented — no longer raises NotImplementedError."""
         t = self._stub_with_deployment()
-        t._ws_url = "wss://provider.example.com/lease/123/1/1/shell"
+        t._provider_host_uri = "https://provider.example.com"
         t._service = "web"
 
-        with patch("just_akash.transport.lease_shell.connect") as mock_ws_connect, \
-             patch("termios.tcgetattr", return_value=[]), \
-             patch("termios.tcsetattr"), \
-             patch("tty.setraw"), \
-             patch("sys.stdin") as mock_stdin, \
-             patch.object(t, "_run_interactive_session"):
+        with (
+            patch("just_akash.transport.lease_shell.connect") as mock_ws_connect,
+            patch("termios.tcgetattr", return_value=[]),
+            patch("termios.tcsetattr"),
+            patch("tty.setraw"),
+            patch("sys.stdin") as mock_stdin,
+            patch.object(t, "_run_interactive_session"),
+        ):
             mock_stdin.isatty.return_value = True
             mock_stdin.fileno.return_value = 0
             # Should not raise NotImplementedError
@@ -179,6 +190,7 @@ class TestLeaseShellTransportStub:
 
 
 # --- make_transport factory ---
+
 
 class TestMakeTransport:
     def test_makes_ssh_transport(self):

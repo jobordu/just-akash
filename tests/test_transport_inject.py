@@ -1,4 +1,5 @@
 """Unit tests for LeaseShellTransport.inject() — Phase 8."""
+
 import base64
 import shlex
 from unittest.mock import MagicMock, patch
@@ -14,20 +15,21 @@ def _make_transport() -> LeaseShellTransport:
         dseq="123",
         api_key="test-key",
         deployment={
-            "leases": [{
-                "provider": {"hostUri": "https://provider.example.com:8443"},
-                "status": {"services": {"web": {"ready_replicas": 1, "total": 1}}},
-            }]
+            "leases": [
+                {
+                    "provider": {"hostUri": "https://provider.example.com:8443"},
+                    "status": {"services": {"web": {"ready_replicas": 1, "total": 1}}},
+                }
+            ]
         },
     )
     t = LeaseShellTransport(config)
-    t._ws_url = "wss://provider.example.com:8443/lease/123/1/1/shell"
+    t._provider_host_uri = "https://provider.example.com:8443"
     t._service = "web"
     return t
 
 
 class TestLeaseShellTransportInject:
-
     def test_inject_creates_parent_directory(self):
         """inject() step 1: calls exec() with mkdir -p $(dirname ...)."""
         t = _make_transport()
@@ -128,18 +130,18 @@ class TestLeaseShellTransportInject:
         # The plain text secret must NOT appear in any exec() command string
         for call in mock_exec.call_args_list:
             cmd = call[0][0]
-            assert secret_value not in cmd, (
-                f"Secret leaked in command: {cmd!r}"
-            )
+            assert secret_value not in cmd, f"Secret leaked in command: {cmd!r}"
 
     def test_inject_calls_prepare_if_not_configured(self):
         """inject() calls prepare() automatically if _ws_url is None."""
         t = _make_transport()
-        t._ws_url = None
+        t._provider_host_uri = None
         t._service = None
 
-        with patch.object(t, "prepare") as mock_prepare, \
-             patch.object(t, "exec", side_effect=[0, 0, 0]):
+        with (
+            patch.object(t, "prepare") as mock_prepare,
+            patch.object(t, "exec", side_effect=[0, 0, 0]),
+        ):
             t.inject("/tmp/test.env", "KEY=val")
 
         mock_prepare.assert_called_once()

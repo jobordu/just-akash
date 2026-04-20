@@ -70,6 +70,21 @@ def _resolve_deployment(client, dseq_arg):
     return dseq
 
 
+def _enrich_deployment_with_provider(client, deployment: dict) -> dict:
+    """Inject provider hostUri into each lease so lease_shell transport can find it.
+
+    The Console API /v1/deployments/{dseq} response stores the provider address as
+    lease["id"]["provider"] but omits the hostUri.  We fetch it and inject a
+    "provider" dict matching the format expected by LeaseShellTransport.
+    """
+    for lease in deployment.get("leases", []):
+        provider_addr = lease.get("id", {}).get("provider", "")
+        if provider_addr and not isinstance(lease.get("provider"), dict):
+            info = client.get_provider(provider_addr) or {}
+            lease["provider"] = {"hostUri": info.get("hostUri", "")}
+    return deployment
+
+
 def _require_ssh(client, dseq, key_arg):
     from .api import _build_ssh_cmd, _extract_ssh_info, _find_ssh_key
 
@@ -246,7 +261,9 @@ def main():
             use_lease_shell = args.transport == "lease-shell"
             if use_lease_shell:
                 from .transport import make_transport
-                deployment = client.get_deployment(dseq)
+                deployment = _enrich_deployment_with_provider(
+                    client, client.get_deployment(dseq)
+                )
                 transport = make_transport(
                     "lease-shell",
                     dseq=dseq,
@@ -281,7 +298,9 @@ def main():
             use_lease_shell = args.transport == "lease-shell"
             if use_lease_shell:
                 from .transport import make_transport
-                deployment = client.get_deployment(dseq)
+                deployment = _enrich_deployment_with_provider(
+                    client, client.get_deployment(dseq)
+                )
                 transport = make_transport(
                     "lease-shell",
                     dseq=dseq,
@@ -343,7 +362,9 @@ def main():
             use_lease_shell = args.transport == "lease-shell"
             if use_lease_shell:
                 from .transport import make_transport
-                deployment = client.get_deployment(dseq)
+                deployment = _enrich_deployment_with_provider(
+                    client, client.get_deployment(dseq)
+                )
                 transport = make_transport(
                     "lease-shell",
                     dseq=dseq,

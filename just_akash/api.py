@@ -299,9 +299,42 @@ class AkashConsoleAPI:
         response = self._request(
             "POST",
             "/v1/create-jwt-token",
-            {"data": {"ttl": ttl, "leases": {dseq: {"access": "full"}}}},
+            {"data": {"ttl": ttl, "leases": {"access": "full", "scope": ["shell"]}}},
         )
         # Response shape: { "data": { "token": "<JWT>" } }
+        if not isinstance(response, dict):
+            raise RuntimeError(f"Unexpected JWT response type: {type(response)}")
+        data = response.get("data", response)
+        if isinstance(data, dict) and "token" in data:
+            token = data["token"]
+            if isinstance(token, str) and token:
+                return token
+        raise RuntimeError(f"JWT token not found in response: {response}")
+
+    def create_jwt_with_provider(self, dseq: str, provider: str, ttl: int = 3600) -> str:
+        """Request a short-lived JWT scoped to a specific provider.
+
+        Uses granular access with scoped permissions for shell access.
+        """
+        response = self._request(
+            "POST",
+            "/v1/create-jwt-token",
+            {
+                "data": {
+                    "ttl": ttl,
+                    "leases": {
+                        "access": "granular",
+                        "permissions": [
+                            {
+                                "provider": provider,
+                                "access": "scoped",
+                                "scope": ["shell"],
+                            }
+                        ],
+                    },
+                }
+            },
+        )
         if not isinstance(response, dict):
             raise RuntimeError(f"Unexpected JWT response type: {type(response)}")
         data = response.get("data", response)

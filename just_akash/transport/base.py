@@ -14,10 +14,12 @@ from typing import Any
 @dataclass
 class TransportConfig:
     """Configuration for a transport instance."""
+
     dseq: str
     api_key: str
     deployment: dict[str, Any] = field(default_factory=dict)
     console_url: str = "https://console-api.akash.network"
+    provider_proxy_url: str = "https://provider-proxy.akash.network"
     service_name: str | None = None
     ssh_key_path: str | None = None
 
