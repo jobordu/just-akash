@@ -160,7 +160,7 @@ class TestExtractSshInfo:
             ]
         }
         result = _extract_ssh_info(dep)
-        assert result["host"] == "5.6.7.8"
+        assert result["host"] == "5.6.7.8"  # type: ignore[index]
 
 
 # ── _extract_lease_provider ─────────────────────────
@@ -303,10 +303,10 @@ class TestAkashConsoleAPI:
             url="http://test",
             code=400,
             msg="Bad Request",
-            hdrs=None,
+            hdrs=None,  # type: ignore[arg-type]
             fp=None,
         )
-        mock_err.read = lambda: b'{"message": "invalid SDL"}'
+        mock_err.read = lambda: b'{"message": "invalid SDL"}'  # type: ignore[assignment]
         mock_urlopen.side_effect = mock_err
 
         client = AkashConsoleAPI("key")
@@ -318,9 +318,13 @@ class TestAkashConsoleAPI:
         import urllib.error
 
         mock_err = urllib.error.HTTPError(
-            url="http://test", code=500, msg="Server Error", hdrs=None, fp=None
+            url="http://test",
+            code=500,
+            msg="Server Error",
+            hdrs=None,  # type: ignore[arg-type]
+            fp=None,
         )
-        mock_err.read = lambda: b"Internal Server Error"
+        mock_err.read = lambda: b"Internal Server Error"  # type: ignore[assignment]
         mock_urlopen.side_effect = mock_err
 
         client = AkashConsoleAPI("key")

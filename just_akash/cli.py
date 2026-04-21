@@ -24,7 +24,7 @@ import sys
 NO_SSH_MSG = (
     "No SSH port found on this deployment.\n"
     "\n"
-    "To use connect, exec, or inject, your SDL must:\n"
+    "To use connect, exec, or inject via SSH, your SDL must:\n"
     "  1. Expose port 22 (SSH)\n"
     "  2. Include SSH_PUBKEY_B64 in the env block\n"
     "  3. Run sshd in the container entrypoint\n"
@@ -32,8 +32,7 @@ NO_SSH_MSG = (
     "Use the SSH-enabled SDL:  just-akash deploy --sdl sdl/cpu-backtest-ssh.yaml\n"
     'Or set SSH_PUBKEY in .env: SSH_PUBKEY="ssh-ed25519 AAAA... your-key"\n'
     "\n"
-    "The Akash Console API does not support lease-shell.\n"
-    "SSH is the only way to connect, exec, or inject secrets."
+    "Alternatively, use lease-shell transport (default in v1.5): no SSH required."
 )
 
 
@@ -69,6 +68,21 @@ def _resolve_deployment(client, dseq_arg):
     if not dseq:
         raise RuntimeError("No deployment selected")
     return dseq
+
+
+def _enrich_deployment_with_provider(client, deployment: dict) -> dict:
+    """Inject provider hostUri into each lease so lease_shell transport can find it.
+
+    The Console API /v1/deployments/{dseq} response stores the provider address as
+    lease["id"]["provider"] but omits the hostUri.  We fetch it and inject a
+    "provider" dict matching the format expected by LeaseShellTransport.
+    """
+    for lease in deployment.get("leases", []):
+        provider_addr = lease.get("id", {}).get("provider", "")
+        if provider_addr and not isinstance(lease.get("provider"), dict):
+            info = client.get_provider(provider_addr) or {}
+            lease["provider"] = {"hostUri": info.get("hostUri", "")}
+    return deployment
 
 
 def _require_ssh(client, dseq, key_arg):
@@ -118,23 +132,33 @@ def main():
 
     # ── connect ────────────────────────────────────────
     connect_p = subparsers.add_parser(
-        "connect", help="SSH into a running deployment (requires SSH in SDL)"
+        "connect", help="Open interactive shell on a running deployment"
     )
     connect_p.add_argument("--dseq", default="")
     connect_p.add_argument("--key", default="")
+    connect_p.add_argument(
+        "--transport",
+        choices=["ssh", "lease-shell"],
+        default="lease-shell",
+        dest="transport",
+        help="Transport to use: 'lease-shell' (default) or 'ssh'",
+    )
 
     # ── exec ───────────────────────────────────────────
-    exec_p = subparsers.add_parser(
-        "exec", help="Execute a command on a running deployment (requires SSH in SDL)"
-    )
+    exec_p = subparsers.add_parser("exec", help="Execute a command on a running deployment")
     exec_p.add_argument("--dseq", default="")
     exec_p.add_argument("--key", default="")
+    exec_p.add_argument(
+        "--transport",
+        choices=["ssh", "lease-shell"],
+        default="lease-shell",
+        dest="transport",
+        help="Transport to use: 'lease-shell' (default) or 'ssh'",
+    )
     exec_p.add_argument("remote_cmd", help="Command to execute remotely")
 
     # ── inject ─────────────────────────────────────────
-    inject_p = subparsers.add_parser(
-        "inject", help="Inject secrets into a running deployment via SSH (requires SSH in SDL)"
-    )
+    inject_p = subparsers.add_parser("inject", help="Inject secrets into a running deployment")
     inject_p.add_argument("--dseq", default="")
     inject_p.add_argument("--key", default="")
     inject_p.add_argument(
@@ -155,6 +179,13 @@ def main():
         dest="remote_path",
         default="/run/secrets/.env",
         help="Remote path to write secrets (default: /run/secrets/.env)",
+    )
+    inject_p.add_argument(
+        "--transport",
+        choices=["ssh", "lease-shell"],
+        default="lease-shell",
+        dest="transport",
+        help="Transport to use: 'lease-shell' (default) or 'ssh'",
     )
 
     # ── list ───────────────────────────────────────────
@@ -223,9 +254,31 @@ def main():
         try:
             client = AkashConsoleAPI(_require_api_key())
             dseq = _resolve_deployment(client, args.dseq)
-            ssh, ssh_cmd = _require_ssh(client, dseq, args.key)
-            print(f"Connecting to {ssh['host']}:{ssh['port']}...")
-            os.execvp("ssh", ssh_cmd)
+            use_lease_shell = args.transport == "lease-shell"
+            if use_lease_shell:
+                from .transport import make_transport
+
+                deployment = _enrich_deployment_with_provider(client, client.get_deployment(dseq))
+                transport = make_transport(
+                    "lease-shell",
+                    dseq=dseq,
+                    api_key=client.api_key,
+                    deployment=deployment,
+                )
+                if not transport.validate():
+                    print(
+                        "Notice: lease-shell transport is not available for this deployment "
+                        "(no active lease or provider hostUri missing). Falling back to SSH.",
+                        file=sys.stderr,
+                    )
+                    use_lease_shell = False
+            if use_lease_shell:
+                transport.prepare()
+                transport.connect()
+            else:
+                ssh, ssh_cmd = _require_ssh(client, dseq, args.key)
+                print(f"Connecting to {ssh['host']}:{ssh['port']}...")
+                os.execvp("ssh", ssh_cmd)
         except RuntimeError as e:
             print(f"Error: {e}", file=sys.stderr)
             sys.exit(1)
@@ -237,11 +290,34 @@ def main():
         try:
             client = AkashConsoleAPI(_require_api_key())
             dseq = _resolve_deployment(client, args.dseq)
-            ssh, ssh_cmd = _require_ssh(client, dseq, args.key)
-            ssh_cmd.append(args.remote_cmd)
-            print(f"Executing on {ssh['host']}:{ssh['port']}...")
-            result = subprocess.run(ssh_cmd, text=True)
-            sys.exit(result.returncode)
+            use_lease_shell = args.transport == "lease-shell"
+            if use_lease_shell:
+                from .transport import make_transport
+
+                deployment = _enrich_deployment_with_provider(client, client.get_deployment(dseq))
+                transport = make_transport(
+                    "lease-shell",
+                    dseq=dseq,
+                    api_key=client.api_key,
+                    deployment=deployment,
+                )
+                if not transport.validate():
+                    print(
+                        "Notice: lease-shell transport is not available for this deployment "
+                        "(no active lease or provider hostUri missing). Falling back to SSH.",
+                        file=sys.stderr,
+                    )
+                    use_lease_shell = False
+            if use_lease_shell:
+                transport.prepare()
+                rc = transport.exec(args.remote_cmd)
+                sys.exit(rc)
+            else:
+                ssh, ssh_cmd = _require_ssh(client, dseq, args.key)
+                ssh_cmd.append(args.remote_cmd)
+                print(f"Executing on {ssh['host']}:{ssh['port']}...")
+                result = subprocess.run(ssh_cmd, text=True)
+                sys.exit(result.returncode)
         except RuntimeError as e:
             print(f"Error: {e}", file=sys.stderr)
             sys.exit(1)
@@ -277,28 +353,52 @@ def main():
                 print("Error: No secrets to inject. Use --env KEY=VALUE or --env-file PATH")
                 sys.exit(1)
 
-            ssh, ssh_cmd = _require_ssh(client, dseq, args.key)
-            remote_path = args.remote_path
-            secrets_content = "\n".join(env_lines) + "\n"
+            use_lease_shell = args.transport == "lease-shell"
+            if use_lease_shell:
+                from .transport import make_transport
 
-            mkdir_cmd = ssh_cmd + [f"mkdir -p $(dirname {remote_path})"]
-            result = subprocess.run(mkdir_cmd, capture_output=True, text=True)
-            if result.returncode != 0:
-                print(f"Error creating remote directory: {result.stderr.strip()}")
-                sys.exit(1)
+                deployment = _enrich_deployment_with_provider(client, client.get_deployment(dseq))
+                transport = make_transport(
+                    "lease-shell",
+                    dseq=dseq,
+                    api_key=client.api_key,
+                    deployment=deployment,
+                )
+                if not transport.validate():
+                    print(
+                        "Notice: lease-shell transport is not available for this deployment "
+                        "(no active lease or provider hostUri missing). Falling back to SSH.",
+                        file=sys.stderr,
+                    )
+                    use_lease_shell = False
+            if use_lease_shell:
+                secrets_content = "\n".join(env_lines) + "\n"
+                transport.prepare()
+                transport.inject(args.remote_path, secrets_content)
+                print(f"Injected {len(env_lines)} secret(s) into {dseq}:{args.remote_path}")
+            else:
+                ssh, ssh_cmd = _require_ssh(client, dseq, args.key)
+                remote_path = args.remote_path
+                secrets_content = "\n".join(env_lines) + "\n"
 
-            write_cmd = ssh_cmd + [f"cat > {remote_path}"]
-            result = subprocess.run(
-                write_cmd, input=secrets_content, capture_output=True, text=True
-            )
-            if result.returncode != 0:
-                print(f"Error writing secrets: {result.stderr.strip()}")
-                sys.exit(1)
+                mkdir_cmd = ssh_cmd + [f"mkdir -p $(dirname {remote_path})"]
+                result = subprocess.run(mkdir_cmd, capture_output=True, text=True)
+                if result.returncode != 0:
+                    print(f"Error creating remote directory: {result.stderr.strip()}")
+                    sys.exit(1)
 
-            chmod_cmd = ssh_cmd + [f"chmod 600 {remote_path}"]
-            subprocess.run(chmod_cmd, capture_output=True, text=True)
+                write_cmd = ssh_cmd + [f"cat > {remote_path}"]
+                result = subprocess.run(
+                    write_cmd, input=secrets_content, capture_output=True, text=True
+                )
+                if result.returncode != 0:
+                    print(f"Error writing secrets: {result.stderr.strip()}")
+                    sys.exit(1)
 
-            print(f"Injected {len(env_lines)} secret(s) into {dseq}:{remote_path}")
+                chmod_cmd = ssh_cmd + [f"chmod 600 {remote_path}"]
+                subprocess.run(chmod_cmd, capture_output=True, text=True)
+
+                print(f"Injected {len(env_lines)} secret(s) into {dseq}:{remote_path}")
         except RuntimeError as e:
             print(f"Error: {e}", file=sys.stderr)
             sys.exit(1)

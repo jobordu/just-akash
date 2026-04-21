@@ -4,15 +4,12 @@ Justfile recipes + Python CLI for deploying on [Akash Network](https://akash.net
 
 Self-contained — clone, configure `.env`, and run.
 
-## What's New in v1.4.0
+## What's New in v1.5.0
 
-- **Secrets injection** via SSH (`just inject` / `just-akash inject`)
-- **Remote command execution** (`just exec` / `just-akash exec`)
-- **SDL env injection** at deploy time (`--env KEY=VALUE`, provider-visible)
-- **Configurable Console API URL** via `AKASH_CONSOLE_URL` env var
-- **Unified CLI** — all commands are top-level (`deploy`, `connect`, `exec`, `inject`, `list`, `status`, `destroy`, `tag`)
-- **E2E secrets test** (`just test-secrets`) — deploy, inject, verify, cleanup
-- **357 tests** with 69% coverage
+- **Lease-shell transport** — exec and inject via WebSocket proxy (`wss://console.akash.network/provider-proxy-mainnet`), **no SSH required**
+- **Dual transport** — `--transport lease-shell` (default) or `--transport ssh` on every `exec`/`inject`/`connect` command
+- **514 tests** with 68% coverage
+- **CI pipeline** — ruff lint, ruff format, pyright typecheck, unit tests, E2E lease-shell test, E2E secrets test
 
 ## Prerequisites
 
@@ -37,20 +34,22 @@ uv run pre-commit install   # install gitleaks + ruff hooks
 
 | Command | Usage | Purpose |
 |---|---|---|
-| `just deploy` | `just deploy` | Deploy with custom SDL/image |
+| `just deploy [sdl] [image]` | `just deploy` | Deploy with custom SDL/image |
 | `just up [tag]` | `just up my-web-app` | Deploy SSH instance + optional tag |
-| `just connect` | `just connect 12345` | SSH into a running instance |
-| `just exec` | `just exec "" "ls -la"` | Execute a remote command |
-| `just inject` | `just inject "" .env.secrets` | Inject secrets via SSH |
-| `just destroy` | `just destroy 12345` | Destroy an instance |
+| `just connect [dseq] [transport]` | `just connect 12345 ssh` | Connect to a running instance (lease-shell default) |
+| `just exec [dseq] "cmd" [transport]` | `just exec 12345 "ls -la"` | Execute a remote command |
+| `just inject [dseq] [env-file] [transport]` | `just inject 12345 .env.secrets` | Inject secrets (lease-shell default) |
+| `just destroy [dseq]` | `just destroy 12345` | Destroy an instance |
 | `just destroy-all` | `just destroy-all` | Destroy all instances |
 | `just list` | `just list` | List active instances |
-| `just status` | `just status 12345` | Show instance details |
-| `just tag` | `just tag 12345 my-db` | Tag a deployment with a name |
-| `just test` | `just test` | Lifecycle test (deploy/SSH/destroy) |
-| `just test-secrets` | `just test-secrets` | Secrets injection E2E test |
+| `just status [dseq]` | `just status 12345` | Show instance details |
+| `just tag [dseq] [name]` | `just tag 12345 my-db` | Tag a deployment with a name |
+| `just test-shell` | `just test-shell` | E2E lease-shell transport test (deploy/exec/inject/cleanup) |
+| `just test-secrets` | `just test-secrets` | E2E secrets injection test (SSH inject + lease-shell cross-check) |
 | `just lint` | `just lint` | Ruff lint + format check |
 | `just secrets` | `just secrets` | Gitleaks secret scan |
+
+Transport: `connect`, `exec`, and `inject` default to `lease-shell`. Pass `ssh` as the last argument to force SSH: `just exec 12345 "cmd" ssh`.
 
 ### DSEQs vs Tags
 
@@ -61,26 +60,29 @@ uv run pre-commit install   # install gitleaks + ruff hooks
 ```bash
 just up my-web-app         # Deploy and tag as "my-web-app"
 just status my-web-app     # Check status using tag
-just connect my-web-app    # SSH in using tag
+just connect my-web-app    # Connect in using tag
 just destroy my-web-app    # Destroy using tag
 ```
 
 ### Secrets Injection
 
-Inject secrets into a running deployment via SSH (never exposed in the SDL or to the provider):
+Inject secrets into a running deployment — **no SSH required** (lease-shell is the default).
 
 ```bash
-# From a file
+# From a file (lease-shell, default)
 just inject "" .env.secrets
 
-# Or inline via CLI
-just-akash inject --dseq 12345 --env SECRET_KEY=abc --env DB_PASS=xyz
+# Force SSH transport
+just inject 12345 .env.secrets ssh
 
-# Or with a file
-just-akash inject --dseq 12345 --env-file .env.secrets
+# Or with inline CLI args
+uv run just-akash inject --dseq 12345 --env SECRET_KEY=abc --env DB_PASS=xyz
+
+# From a file
+uv run just-akash inject --dseq 12345 --env-file .env.secrets
 ```
 
-Secrets are written to `/run/secrets/.env` with `chmod 600`. Requires an SSH-enabled SDL.
+Secrets are written to `/run/secrets/.env` (or custom `--remote-path`) with `chmod 600`.
 
 ### With `uv run` (direct CLI)
 
@@ -95,6 +97,10 @@ uv run just-akash deploy --sdl sdl/cpu-backtest-ssh.yaml --env REGION=us-east
 uv run just-akash connect --dseq 12345
 uv run just-akash exec --dseq 12345 "echo hello"
 uv run just-akash inject --dseq 12345 --env-file .env.secrets
+
+# Force SSH transport
+uv run just-akash exec --dseq 12345 --transport ssh "echo hello"
+uv run just-akash inject --dseq 12345 --transport ssh --env-file .env.secrets
 
 # List / status / destroy
 uv run just-akash list
@@ -113,15 +119,27 @@ uv run just-akash tag --dseq 12345 --name my-job
 | `AKASH_CONSOLE_URL` | No | Console API base URL (default: `https://console-api.akash.network`) |
 | `AKASH_DEBUG` | No | Set to `1` for verbose API/deploy logging |
 
-## SSH Requirement
+## Transports
 
-The `connect`, `exec`, and `inject` commands require SSH to be configured in the SDL:
+`exec`, `inject`, and `connect` support two transports:
 
-1. Port 22 exposed in the SDL
-2. `SSH_PUBKEY` set in `.env` (injected as `SSH_PUBKEY_B64` placeholder)
-3. Container entrypoint runs `sshd`
+### Lease-shell (default)
 
-The default SSH SDL (`sdl/cpu-backtest-ssh.yaml`) handles all of this. The Akash Console API does not support lease-shell — SSH is the only remote execution path.
+Uses the Akash Console WebSocket proxy (`wss://console.akash.network/provider-proxy-mainnet`) to relay commands to the provider. **No SSH required.** The proxy connects to the provider using a JWT with provider-scoped permissions.
+
+```bash
+just exec 12345 "echo hello"              # lease-shell (default)
+just inject 12345 .env.secrets          # lease-shell (default)
+```
+
+### SSH
+
+Traditional SSH connection to the container. Requires an SSH-enabled SDL and `SSH_PUBKEY` configured.
+
+```bash
+just exec 12345 "echo hello" ssh        # force SSH
+just inject 12345 .env.secrets ssh      # force SSH
+```
 
 ## Bid Selection
 

@@ -33,3 +33,92 @@ jobs:
 
       - name: Pyright type check
         run: uv run pyright
+
+  unit-tests:
+    name: Unit tests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+
+      - name: Install dependencies
+        run: uv sync --dev
+
+      - name: Run unit tests
+        run: uv run pytest tests/ --tb=short -q
+
+  e2e-shell:
+    name: E2E lease-shell transport
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push' || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository)
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+
+      - name: Install dependencies
+        run: uv sync --dev
+
+      - name: Install just
+        uses: taiki-e/install-action@v2
+        with:
+          tool: just
+
+      - name: Run E2E lease-shell test
+        env:
+          AKASH_API_KEY: ${{ secrets.AKASH_API_KEY }}
+          AKASH_PROVIDERS: ${{ secrets.AKASH_PROVIDERS }}
+          SSH_PUBKEY: ${{ secrets.SSH_PUBKEY }}
+        run: uv run python -m just_akash.test_shell_e2e
+
+  e2e-secrets:
+    name: E2E secrets injection
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push' || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository)
+    env:
+      AKASH_API_KEY: ${{ secrets.AKASH_API_KEY }}
+      AKASH_PROVIDERS: ${{ secrets.AKASH_PROVIDERS }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+
+      - name: Install dependencies
+        run: uv sync --dev
+
+      - name: Install just
+        uses: taiki-e/install-action@v2
+        with:
+          tool: just
+
+      - name: Generate SSH keypair
+        run: |
+          mkdir -p ~/.ssh
+          ssh-keygen -t ed25519 -f ~/.ssh/id_ed25519 -N "" -C "akash-e2e"
+          echo "SSH_KEY_PATH=~/.ssh/id_ed25519" >> "$GITHUB_ENV"
+          echo "SSH_PUBKEY=$(cat ~/.ssh/id_ed25519.pub)" >> "$GITHUB_ENV"
+
+      - name: Run E2E secrets test
+        run: uv run python -m just_akash.test_secrets_e2e

@@ -4,11 +4,6 @@ version: "2.0"
 services:
   backtest:
     image: python:3.13-slim
-    params:
-      storage:
-        data:
-          mount: /data
-          readOnly: false
     env:
       - SSH_PUBKEY_B64=PLACEHOLDER_SSH_PUBKEY_B64
     expose:
@@ -45,16 +40,11 @@ profiles:
     backtest:
       resources:
         cpu:
-          units: 16
+          units: 1
         memory:
-          size: 64Gi
+          size: 1Gi
         storage:
-          - size: 20Gi
-          - name: data
-            size: 200Gi
-            attributes:
-              persistent: true
-              class: beta3
+          - size: 5Gi
 
   placement:
     akash:
