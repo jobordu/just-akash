@@ -1,13 +1,13 @@
 #!/usr/bin/env python3
 """
-E2E test: inject secrets via SSH, verify via SSH.
+E2E test: inject secrets via SSH transport, verify via SSH.
 
 Flow:
   1. Validate environment (API key, providers, SSH key)
-  2. Deploy SSH instance
+  2. Deploy SSH-enabled instance
   3. Wait for SSH readiness
-  4. Inject secrets via SSH
-  5. Verify secrets exist via SSH
+  4. Inject secrets via SSH transport (--transport ssh)
+  5. Verify secrets exist, have correct values, and file has 600 permissions
   6. Cleanup
 
 Requires: AKASH_API_KEY, AKASH_PROVIDERS, SSH_PUBKEY.
@@ -29,7 +29,7 @@ YELLOW = "\033[93m"
 BOLD = "\033[1m"
 RESET = "\033[0m"
 
-TOTAL_STEPS = 6
+TOTAL_STEPS = 7
 
 
 def log_step(n, msg):
@@ -204,7 +204,9 @@ def main():
             f.write(f"{test_secret_key}={test_secret_value}\n")
             f.write("ANOTHER_VAR=hello_world\n")
 
-        inject_cmd = f"uv run just-akash inject --dseq {dseq} --env-file {env_file}"
+        inject_cmd = (
+            f"uv run just-akash inject --dseq {dseq} --env-file {env_file} --transport ssh"
+        )
         log_info(f"Running: {inject_cmd}")
         r = run(inject_cmd, timeout=60)
         print(r.stdout)
@@ -290,8 +292,65 @@ def main():
     else:
         log_info("Skipping verification (inject failed)")
 
-    # ── Step 6: Cleanup ────────────────────────────────
-    log_step(6, f"Cleanup DSEQ {dseq}")
+    # ── Step 6: Cross-check: inject via lease-shell, verify via SSH ──
+    log_step(6, "Cross-check: inject via lease-shell, verify via SSH")
+
+    if "inject" not in [f.split(":")[0] for f in failures]:
+        ls_secret_value = "lease-shell-crosscheck-ok"
+        fd2, env_file2 = tempfile.mkstemp(suffix=".env", prefix="akash-test-ls-")
+        try:
+            with os.fdopen(fd2, "w") as f:
+                f.write(f"CROSSCHECK_KEY={ls_secret_value}\n")
+
+            remote_path2 = "/tmp/e2e-lease-shell-crosscheck.env"
+            inject_cmd2 = (
+                f"uv run just-akash inject --dseq {dseq} --env-file {env_file2}"
+                f" --remote-path {remote_path2} --transport lease-shell"
+            )
+            log_info(f"Running: {inject_cmd2}")
+            r2 = run(inject_cmd2, timeout=30)
+            if r2.returncode != 0:
+                log_fail(f"Lease-shell inject failed (exit {r2.returncode}): {r2.stderr.strip()}")
+                failures.append("crosscheck: lease-shell inject failed")
+            else:
+                verify_crosscheck = [
+                    "ssh",
+                    "-o",
+                    "StrictHostKeyChecking=no",
+                    "-o",
+                    "UserKnownHostsFile=/dev/null",
+                    "-o",
+                    "BatchMode=yes",
+                    "-i",
+                    ssh_key,
+                    "-p",
+                    ssh_port,
+                    f"root@{ssh_host}",
+                    f"cat {remote_path2}",
+                ]
+                try:
+                    xr = subprocess.run(
+                        verify_crosscheck,
+                        capture_output=True,
+                        text=True,
+                        timeout=15,
+                    )
+                    if xr.returncode == 0 and ls_secret_value in xr.stdout:
+                        log_pass("Lease-shell inject verified via SSH — both transports work")
+                    else:
+                        log_fail(f"Cross-check verify failed: {xr.stderr.strip()}")
+                        log_info(f"Content: {xr.stdout[:200]}")
+                        failures.append("crosscheck: value missing")
+                except subprocess.TimeoutExpired:
+                    log_fail("Cross-check SSH verify timed out")
+                    failures.append("crosscheck: timeout")
+        finally:
+            os.unlink(env_file2)
+    else:
+        log_info("Skipping cross-check (inject failed)")
+
+    # ── Step 7: Cleanup ────────────────────────────────
+    log_step(TOTAL_STEPS, f"Cleanup DSEQ {dseq}")
     _cleanup(dseq)
     log_pass("Deployment destroyed")
 

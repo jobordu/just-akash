@@ -2,8 +2,9 @@
 """
 End-to-end lease-shell transport test.
 
-Deploys a container, runs exec/inject via lease-shell, verifies outputs,
-then destroys the deployment.
+Deploys a container, runs exec/inject via lease-shell WebSocket transport,
+verifies outputs, file permissions, multiline content, and cross-checks
+inject by reading the file back over SSH (independent transport).
 
 Usage:
     just test-shell
@@ -11,6 +12,7 @@ Usage:
 Requires: AKASH_API_KEY, AKASH_PROVIDERS, SSH_PUBKEY in environment.
 """
 
+import json
 import os
 import re
 import subprocess
@@ -24,7 +26,7 @@ YELLOW = "\033[93m"
 BOLD = "\033[1m"
 RESET = "\033[0m"
 
-TOTAL_STEPS = 6
+TOTAL_STEPS = 7
 
 
 def log_step(n, msg):
@@ -120,7 +122,8 @@ def main():
 
         if not failures:
             r = run(
-                f"uv run just-akash exec 'echo hello from lease-shell' --dseq {dseq}",
+                f"uv run just-akash exec 'echo hello from lease-shell'"
+                f" --dseq {dseq} --transport lease-shell",
                 timeout=30,
             )
             if r.returncode == 0 and "hello from lease-shell" in r.stdout:
@@ -139,12 +142,15 @@ def main():
             try:
                 with tempfile.NamedTemporaryFile(mode="w", suffix=".env", delete=False) as tmp:
                     tmp.write("TEST_SECRET=injected_value\n")
+                    tmp.write("SECOND_KEY=second_value\n")
+                    tmp.write("# comment line\n")
                     env_file = tmp.name
 
                 remote_path = "/tmp/e2e-test.env"
                 r = run(
                     f"uv run just-akash inject --env-file {env_file}"
-                    f" --remote-path {remote_path} --dseq {dseq}",
+                    f" --remote-path {remote_path} --dseq {dseq}"
+                    f" --transport lease-shell",
                     timeout=30,
                 )
                 if r.returncode != 0:
@@ -152,26 +158,119 @@ def main():
                     failures.append("inject_failed")
                 else:
                     log_pass("inject: env file uploaded")
+
                     r = run(
-                        f"uv run just-akash exec 'cat {remote_path}' --dseq {dseq}",
+                        f"uv run just-akash exec 'cat {remote_path}'"
+                        f" --dseq {dseq} --transport lease-shell",
                         timeout=30,
                     )
-                    if r.returncode == 0 and "injected_value" in r.stdout:
-                        log_pass("inject: verified injected value via exec")
+                    if (
+                        r.returncode == 0
+                        and "injected_value" in r.stdout
+                        and "second_value" in r.stdout
+                    ):
+                        log_pass("inject: verified multiline content via exec")
                     else:
-                        log_fail(f"inject verify failed (rc={r.returncode}):\n{r.stderr}")
+                        log_fail(
+                            f"inject verify failed (rc={r.returncode}):"
+                            f"\nstdout: {r.stdout!r}\nstderr: {r.stderr!r}"
+                        )
                         failures.append("inject_verify_failed")
+
+                    r = run(
+                        f"uv run just-akash exec 'stat -c %a {remote_path}'"
+                        f" --dseq {dseq} --transport lease-shell",
+                        timeout=30,
+                    )
+                    perms = r.stdout.strip()
+                    if r.returncode == 0 and perms == "600":
+                        log_pass("inject: file permissions are 600")
+                    else:
+                        log_fail(f"inject: expected permissions 600, got: {perms!r}")
+                        failures.append("inject_permissions_failed")
             finally:
                 if env_file and os.path.exists(env_file):
                     os.unlink(env_file)
         else:
             log_info("Skipping inject step due to prior failures")
 
+        # ── Step 6: Cross-check inject via SSH ─────────────────
+        log_step(
+            6,
+            f"Cross-check: read injected file via SSH (DSEQ={dseq})",
+        )
+
+        if not failures:
+            ssh_key = os.environ.get("SSH_KEY_PATH")
+            if not ssh_key:
+                for candidate in [
+                    os.path.expanduser(f"~/.ssh/id_ed25519_akash_node{i}") for i in range(1, 4)
+                ] + [os.path.expanduser("~/.ssh/id_ed25519")]:
+                    if os.path.exists(candidate):
+                        ssh_key = candidate
+                        break
+
+            ssh_host = None
+            ssh_port = None
+            r = run(f"uv run just-akash status --dseq {dseq} --json", timeout=30)
+            try:
+                status_data = json.loads(r.stdout)
+                ssh_host = status_data.get("ssh_host")
+                ssh_port = str(status_data.get("ssh_port", ""))
+            except (json.JSONDecodeError, TypeError):
+                pass
+
+            if not ssh_key or not ssh_host or not ssh_port:
+                log_info(
+                    "SSH key or endpoint not available — skipping SSH cross-check (non-fatal)"
+                )
+            else:
+                remote_path = "/tmp/e2e-test.env"
+                verify_cmd = [
+                    "ssh",
+                    "-o",
+                    "StrictHostKeyChecking=no",
+                    "-o",
+                    "UserKnownHostsFile=/dev/null",
+                    "-o",
+                    "BatchMode=yes",
+                    "-i",
+                    ssh_key,
+                    "-p",
+                    ssh_port,
+                    f"root@{ssh_host}",
+                    f"cat {remote_path}",
+                ]
+                try:
+                    xr = subprocess.run(
+                        verify_cmd,
+                        capture_output=True,
+                        text=True,
+                        timeout=15,
+                    )
+                    if (
+                        xr.returncode == 0
+                        and "injected_value" in xr.stdout
+                        and "second_value" in xr.stdout
+                    ):
+                        log_pass(
+                            "SSH cross-check: file content matches — lease-shell inject is real"
+                        )
+                    else:
+                        log_fail(
+                            f"SSH cross-check failed (rc={xr.returncode}): {xr.stderr.strip()}"
+                        )
+                        log_info(f"Content: {xr.stdout[:200]}")
+                        failures.append("ssh_crosscheck_failed")
+                except subprocess.TimeoutExpired:
+                    log_fail("SSH cross-check timed out")
+                    failures.append("ssh_crosscheck_timeout")
+
     except Exception as e:
         log_fail(f"Unexpected error: {e}")
         failures.append(str(e))
     finally:
-        # ── Step 6: Cleanup ───────────────────────────────────
+        # ── Step 7: Cleanup ───────────────────────────────────
         if dseq:
             log_step(TOTAL_STEPS, f"Cleanup: destroy DSEQ={dseq}")
             r = run(f"just destroy {dseq}", timeout=60)

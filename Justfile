@@ -20,8 +20,9 @@ up tag="":
         uv run just-akash tag --dseq "$dseq" --name "{{tag}}"
     fi
 
-# SSH into a running instance (auto-detects DSEQ if only one)
-connect dseq="":
+# Connect to a running instance via lease-shell (default) or SSH
+# Usage: just connect [dseq] [transport=lease-shell|ssh]
+connect dseq="" transport="":
     #!/bin/bash
     set -euo pipefail
     mkdir -p "{{log_dir}}"
@@ -31,11 +32,10 @@ connect dseq="":
     trap 'status=$?; echo "[INFO] recipe=connect finished_at=$(date -u +"%Y-%m-%dT%H:%M:%SZ") exit_code=${status} log_file=${log_file}"' EXIT
     echo "[INFO] recipe=connect started_at=$(date -u +"%Y-%m-%dT%H:%M:%SZ") cwd=$PWD log_file=$log_file dseq={{dseq}}"
     set -x
-    if [ -n "{{dseq}}" ]; then
-        uv run just-akash connect --dseq={{dseq}}
-    else
-        uv run just-akash connect
-    fi
+    cmd="uv run just-akash connect"
+    if [ -n "{{dseq}}" ]; then cmd="$cmd --dseq={{dseq}}"; fi
+    if [ -n "{{transport}}" ]; then cmd="$cmd --transport {{transport}}"; fi
+    eval "$cmd"
 
 # Destroy an instance (picks interactively if no DSEQ given)
 destroy dseq="":
@@ -81,11 +81,11 @@ tag dseq name:
     set -x
     uv run just-akash tag --dseq={{dseq}} --name "{{name}}"
 
-# Inject secrets into a running instance via SSH
-# Usage: just inject [dseq] [env-file]
+# Inject secrets into a running instance via lease-shell (default) or SSH
+# Usage: just inject [dseq] [env-file] [transport=lease-shell|ssh]
 #   just inject "" .env.secrets
 #   just inject 12345 .env.secrets
-inject dseq="" env-file=".env.secrets":
+inject dseq="" env-file=".env.secrets" transport="":
     #!/bin/bash
     set -euo pipefail
     mkdir -p "{{log_dir}}"
@@ -97,11 +97,12 @@ inject dseq="" env-file=".env.secrets":
     set -x
     cmd="uv run just-akash inject --env-file {{env-file}}"
     if [ -n "{{dseq}}" ]; then cmd="$cmd --dseq={{dseq}}"; fi
+    if [ -n "{{transport}}" ]; then cmd="$cmd --transport {{transport}}"; fi
     eval "$cmd"
 
-# Execute a command on a running instance via SSH
-# Usage: just exec [dseq] "command"
-exec dseq="" command="":
+# Execute a command on a running instance via lease-shell (default) or SSH
+# Usage: just exec [dseq] [transport=lease-shell|ssh] "command"
+exec dseq="" command="" transport="":
     #!/bin/bash
     set -euo pipefail
     mkdir -p "{{log_dir}}"
@@ -113,6 +114,7 @@ exec dseq="" command="":
     set -x
     cmd="uv run just-akash exec '{{command}}'"
     if [ -n "{{dseq}}" ]; then cmd="$cmd --dseq={{dseq}}"; fi
+    if [ -n "{{transport}}" ]; then cmd="$cmd --transport {{transport}}"; fi
     eval "$cmd"
 
 # ── Info ─────────────────────────────────────────────
