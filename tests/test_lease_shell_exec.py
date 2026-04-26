@@ -574,6 +574,7 @@ class TestBuildShellPath:
         assert "cmd0=" in url
         # But the value after cmd0= should be empty (just cmd0= followed by & or end of string)
         import re
+
         match = re.search(r"cmd0=([^&]*)", url)
         assert match is not None
         assert match.group(1) == "", (

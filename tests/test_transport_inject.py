@@ -325,9 +325,7 @@ class TestLeaseShellTransportInject:
         """
         t = _make_transport()
         dangerous_content = (
-            "DB_URL=postgres://u:p@host/db\n"
-            "SECRET=$(cat /etc/shadow)\n"
-            "TOKEN=`whoami`"
+            "DB_URL=postgres://u:p@host/db\nSECRET=$(cat /etc/shadow)\nTOKEN=`whoami`"
         )
         encoded = base64.b64encode(dangerous_content.encode("utf-8")).decode("ascii")
 
@@ -366,6 +364,4 @@ class TestLeaseShellTransportInject:
 
         # Verify chmod was never called
         chmod_calls = [c for c in call_log if "chmod" in c]
-        assert len(chmod_calls) == 0, (
-            f"chmod was called despite write failure: {chmod_calls}"
-        )
+        assert len(chmod_calls) == 0, f"chmod was called despite write failure: {chmod_calls}"
