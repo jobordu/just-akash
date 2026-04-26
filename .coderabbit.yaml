@@ -15,7 +15,7 @@ reviews:
   # High-level summary at the top of each review
   review_status: true
 
-  # Require all CodeRabbit comment threads to be resolved before merge
+  # Disable finishing-touch generation for docstrings and unit tests
   finishing_touches:
     docstrings:
       enabled: false
