@@ -269,15 +269,10 @@ class TestProviderInfoExtraction:
             transport._extract_provider_info()
 
     def test_extract_provider_info_lease_id_none_does_not_set_provider_address(self):
-        """When lease['id'] is None, provider_address must remain unset.
+        """When lease['id'] is None, _provider_address must remain unset.
 
-        Line 102-104: lease_id = lease.get('id') returns None.
-        The condition `lease_id is not None and not isinstance(lease_id, dict)` is False
-        (because lease_id IS None), so it does not raise. Then line 104:
-        `lease_id.get(...)` is guarded by `isinstance(lease_id, dict)` which is False
-        for None, so provider_addr stays ''. This means _provider_address is never set,
-        and _fetch_jwt will use create_jwt (without provider) instead of
-        create_jwt_with_provider. Verify this path works and provider_address stays None.
+        lease_id = lease.get('id') returns None, so the dict-based provider
+        address extraction is skipped and _provider_address stays None.
         """
         config = TransportConfig(
             dseq="123",
@@ -295,6 +290,7 @@ class TestProviderInfoExtraction:
         transport = LeaseShellTransport(config)
         host_uri, service = transport._extract_provider_info()
         assert host_uri == "https://provider.com"
+        assert service == "web"
         assert transport._provider_address is None
 
 
