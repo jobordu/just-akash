@@ -259,11 +259,10 @@ class TestLeaseShellTransportInject:
         with patch.object(t, "_exec_shell_command", return_value=0) as mock_cmd:
             t.inject("/tmp/secret.env", f"PASSWORD={secret_value}")
 
-        # mkdir and chmod commands should not contain the secret
-        mkdir_cmd = mock_cmd.call_args_list[0][0][0]
-        chmod_cmd = mock_cmd.call_args_list[2][0][0]
-        assert secret_value not in mkdir_cmd, f"Secret leaked in mkdir: {mkdir_cmd!r}"
-        assert secret_value not in chmod_cmd, f"Secret leaked in chmod: {chmod_cmd!r}"
+        # no command should contain the raw secret value
+        for i, call_args in enumerate(mock_cmd.call_args_list):
+            cmd = call_args[0][0]
+            assert secret_value not in cmd, f"Secret leaked in command[{i}]: {cmd!r}"
 
     def test_inject_calls_prepare_if_not_configured(self):
         t = _make_transport()

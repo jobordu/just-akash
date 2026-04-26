@@ -1060,9 +1060,12 @@ class TestTokenRefresh:
         assert _is_auth_expiry_message("unauthorized access") is True
         assert _is_auth_expiry_message("Token Expired") is True
         assert _is_auth_expiry_message("UNAUTHORIZED") is True
-        assert _is_auth_expiry_message("contains token in message") is True
+        assert _is_auth_expiry_message("jwt expired") is True
+        assert _is_auth_expiry_message("session expired") is True
 
-        # False cases
+        # False cases — bare "token" without expiry context must NOT match
+        assert _is_auth_expiry_message("contains token in message") is False
+        assert _is_auth_expiry_message("invalid token format") is False
         assert _is_auth_expiry_message("connection reset") is False
         assert _is_auth_expiry_message("timeout occurred") is False
         assert _is_auth_expiry_message("") is False
@@ -1126,6 +1129,5 @@ class TestTokenRefresh:
         payload = json.dumps({"exit_code": None}).encode("utf-8")
         frame = bytes([102]) + payload
         result = LeaseShellTransport._dispatch_frame(frame)
-        # Must not crash; should return 0 (default)
-        assert result is not None
-        assert isinstance(result, int)
+        # null exit_code must be treated as 0
+        assert result == 0

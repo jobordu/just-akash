@@ -43,7 +43,12 @@ _FRAME_RESIZE = 105
 
 def _is_auth_expiry_message(msg: str) -> bool:
     lower = msg.lower()
-    return "expired" in lower or "unauthorized" in lower or "token" in lower
+    return (
+        "expired" in lower
+        or "unauthorized" in lower
+        or "jwt expired" in lower
+        or "token expired" in lower
+    )
 
 
 def _is_auth_expiry(exc: ConnectionClosedError) -> bool:
@@ -225,8 +230,11 @@ class LeaseShellTransport(Transport):
             sys.stderr.buffer.flush()
         elif code == 102:
             try:
-                return int(json.loads(payload).get("exit_code", 0))
-            except (json.JSONDecodeError, TypeError, ValueError, AttributeError):
+                parsed = json.loads(payload)
+                if isinstance(parsed, dict):
+                    exit_code = parsed.get("exit_code", 0)
+                    return 0 if exit_code is None else int(exit_code)
+            except (json.JSONDecodeError, TypeError, ValueError):
                 pass
             if len(payload) >= 4:
                 try:
