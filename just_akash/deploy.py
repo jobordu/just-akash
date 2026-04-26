@@ -163,12 +163,16 @@ def deploy(
             try:
                 active = client.list_deployments(active_only=True)
                 for dep in active:
+                    # Only close deployments without a lease (stale from failed runs)
+                    leases = dep.get("leases") or dep.get("lease", [])
+                    if leases:
+                        continue
                     stale_dseq = dep.get("dseq") or dep.get("deployment", {}).get("dseq")
                     if stale_dseq:
                         client.close_deployment(str(stale_dseq))
                         _log(logging.INFO, f"Closed stale deployment {stale_dseq}")
             except Exception as cleanup_err:
-                _log(logging.ERROR, f"Failed to close stale deployments: {cleanup_err}")
+                _log(logging.ERROR, f"Stale deployment cleanup failed: {cleanup_err}")
             # Retry once after cleanup
             try:
                 deployment_response = client.create_deployment(sdl_content)
