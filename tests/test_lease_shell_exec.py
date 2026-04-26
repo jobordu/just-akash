@@ -268,6 +268,31 @@ class TestProviderInfoExtraction:
         with pytest.raises(RuntimeError):
             transport._extract_provider_info()
 
+    def test_extract_provider_info_lease_id_none_does_not_set_provider_address(self):
+        """When lease['id'] is None, _provider_address must remain unset.
+
+        lease_id = lease.get('id') returns None, so the dict-based provider
+        address extraction is skipped and _provider_address stays None.
+        """
+        config = TransportConfig(
+            dseq="123",
+            api_key="key",
+            deployment={
+                "leases": [
+                    {
+                        "id": None,
+                        "provider": {"hostUri": "https://provider.com"},
+                        "status": {"services": {"web": {}}},
+                    }
+                ]
+            },
+        )
+        transport = LeaseShellTransport(config)
+        host_uri, service = transport._extract_provider_info()
+        assert host_uri == "https://provider.com"
+        assert service == "web"
+        assert transport._provider_address is None
+
 
 # --- Frame Dispatch Tests ---
 
@@ -502,6 +527,55 @@ class TestBuildShellPath:
         assert ";" not in url
         assert "%3B" in url
         assert "cmd1=hello%3B" in url
+
+    def test_build_shell_path_command_none_produces_no_cmd_params(self):
+        """_build_provider_shell_url(command=None) must not include any cmd params.
+
+        When command is None, the `if command is not None` branch is skipped entirely.
+        This is the path used for interactive shell sessions (connect).
+        Verify no cmd0=, cmd1=, etc. appear in the URL.
+        """
+        config = TransportConfig(
+            dseq="123",
+            api_key="key",
+            deployment=DEPLOYMENT_FIXTURE,
+        )
+        transport = LeaseShellTransport(config)
+        transport._provider_host_uri = "https://provider.com"
+        transport._service = "web"
+        url = transport._build_provider_shell_url(command=None, tty=True, stdin=True)
+        assert "cmd0=" not in url
+        assert "cmd1=" not in url
+        assert "tty=true" in url
+        assert "stdin=true" in url
+
+    def test_build_shell_path_empty_string_command_produces_single_empty_cmd(self):
+        """_build_provider_shell_url(command='') produces cmd0= with empty value.
+
+        An empty string is not None, so the code enters the `if command is not None`
+        branch and splits '' by space, yielding [''], which produces cmd0= with an
+        empty URL-encoded value. This is a boundary case that could cause provider-side
+        errors if the provider doesn't expect an empty command argument.
+        """
+        config = TransportConfig(
+            dseq="123",
+            api_key="key",
+            deployment=DEPLOYMENT_FIXTURE,
+        )
+        transport = LeaseShellTransport(config)
+        transport._provider_host_uri = "https://provider.com"
+        transport._service = "web"
+        url = transport._build_provider_shell_url(command="")
+        # '' is not None, so cmd params are generated
+        assert "cmd0=" in url
+        # But the value after cmd0= should be empty (just cmd0= followed by & or end of string)
+        import re
+
+        match = re.search(r"cmd0=([^&]*)", url)
+        assert match is not None
+        assert match.group(1) == "", (
+            f"Expected empty cmd0 value for empty command string, got {match.group(1)!r}"
+        )
 
     def test_build_shell_path_whitespace_only_command_produces_empty_cmd_params(self):
         """Whitespace-only command splits into empty cmd params — edge-case URL generation."""
@@ -982,9 +1056,12 @@ class TestTokenRefresh:
         assert _is_auth_expiry_message("unauthorized access") is True
         assert _is_auth_expiry_message("Token Expired") is True
         assert _is_auth_expiry_message("UNAUTHORIZED") is True
-        assert _is_auth_expiry_message("contains token in message") is True
+        assert _is_auth_expiry_message("jwt expired") is True
+        assert _is_auth_expiry_message("session expired") is True
 
-        # False cases
+        # False cases — bare "token" without expiry context must NOT match
+        assert _is_auth_expiry_message("contains token in message") is False
+        assert _is_auth_expiry_message("invalid token format") is False
         assert _is_auth_expiry_message("connection reset") is False
         assert _is_auth_expiry_message("timeout occurred") is False
         assert _is_auth_expiry_message("") is False
@@ -1023,3 +1100,31 @@ class TestTokenRefresh:
         rcvd.reason = None
         exc.rcvd = rcvd
         assert _is_auth_expiry(exc) is False
+
+    def test_is_auth_expiry_with_no_rcvd_falls_back_to_str_negative(self):
+        """When rcvd is None and str(exc) has no auth keywords, returns False."""
+        exc = ConnectionClosedError(rcvd=None, sent=None)
+        # str(exc) for rcvd=None says "no close frame received" — no auth keywords
+        assert _is_auth_expiry(exc) is False
+
+    def test_is_auth_expiry_with_no_rcvd_falls_back_to_str_positive(self):
+        """When rcvd is None and str(exc) contains auth keywords, returns True."""
+        exc = MagicMock(spec=ConnectionClosedError)
+        exc.rcvd = None
+        exc.__str__ = MagicMock(return_value="websocket closed: token expired")
+        assert _is_auth_expiry(exc) is True
+
+    def test_dispatch_frame_code_102_json_exit_code_null_returns_zero(self):
+        """Code 102 with JSON {"exit_code": null} must return 0, not crash.
+
+        json.loads produces {"exit_code": None}. The code does
+        int(json.loads(...).get("exit_code", 0)) which means int(None) is called,
+        raising TypeError. The except clause should catch this and fall through
+        to the int32 path or default to 0. This test verifies the implementation
+        handles null exit_code gracefully.
+        """
+        payload = json.dumps({"exit_code": None}).encode("utf-8")
+        frame = bytes([102]) + payload
+        result = LeaseShellTransport._dispatch_frame(frame)
+        # null exit_code must be treated as 0
+        assert result == 0
