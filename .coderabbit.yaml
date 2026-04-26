@@ -1,0 +1,47 @@
+# yaml-language-server: $schema=https://coderabbit.ai/integrations/schema.v2.json
+
+language: en-US
+
+reviews:
+  # Auto-review every PR
+  auto_review:
+    enabled: true
+    # Ignore drafts until they're ready
+    drafts: false
+
+  # Submit "Request Changes" when issues are found (not just comments)
+  request_changes_workflow: true
+
+  # High-level summary at the top of each review
+  review_status: true
+
+  # Disable finishing-touch generation for docstrings and unit tests
+  finishing_touches:
+    docstrings:
+      enabled: false
+    unit_tests:
+      enabled: false
+
+  path_instructions:
+    - path: "**/*.py"
+      instructions: |
+        - This is a Python 3.13 project using uv for dependency management.
+        - Linting uses ruff; type checking uses pyright.
+        - Flag any security issues, especially around secret handling and SSH key management.
+    - path: ".github/workflows/**"
+      instructions: |
+        - Ensure workflow changes don't weaken CI gates (test, lint, secrets).
+        - Flag any use of pull_request_target or other privilege escalation patterns.
+
+  # Tools CodeRabbit should run during review
+  tools:
+    ruff:
+      enabled: true
+    shellcheck:
+      enabled: true
+    github-checks:
+      enabled: true
+      timeout_ms: 300000
+
+chat:
+  auto_reply: true
