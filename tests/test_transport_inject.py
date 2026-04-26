@@ -324,7 +324,11 @@ class TestLeaseShellTransportInject:
         _exec_shell_command call -- only the base64-encoded form does.
         """
         t = _make_transport()
-        dangerous_content = 'DB_URL=postgres://u:p@host/db\nSECRET=$(cat /etc/shadow)\nTOKEN=`whoami`'
+        dangerous_content = (
+            "DB_URL=postgres://u:p@host/db\n"
+            "SECRET=$(cat /etc/shadow)\n"
+            "TOKEN=`whoami`"
+        )
         encoded = base64.b64encode(dangerous_content.encode("utf-8")).decode("ascii")
 
         with patch.object(t, "_exec_shell_command", return_value=0) as mock_cmd:
