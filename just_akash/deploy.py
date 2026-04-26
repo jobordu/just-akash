@@ -150,13 +150,40 @@ def deploy(
         sdl_content = _inject_env_into_sdl(sdl_content, env_vars)
         _log(logging.INFO, f"Injected {len(env_vars)} env var(s) into SDL (provider-visible)")
 
-    # Step 2: Create deployment
+    # Step 2: Create deployment (with stale-deployment recovery)
     _log(logging.INFO, "STEP 2: Creating deployment via Console API...")
     try:
         deployment_response = client.create_deployment(sdl_content)
     except RuntimeError as e:
-        _log(logging.ERROR, f"Create deployment FAILED: {e}")
-        raise RuntimeError(f"Failed to create deployment: {e}") from e
+        if "already exists" in str(e).lower():
+            _log(
+                logging.WARNING,
+                "Deployment already exists — closing stale deployments and retrying...",
+            )
+            try:
+                active = client.list_deployments(active_only=True)
+                for dep in active:
+                    # Only close deployments without a lease (stale from failed runs)
+                    leases = dep.get("leases") or dep.get("lease", [])
+                    if leases:
+                        continue
+                    stale_dseq = dep.get("dseq") or dep.get("deployment", {}).get("dseq")
+                    if stale_dseq:
+                        client.close_deployment(str(stale_dseq))
+                        _log(logging.INFO, f"Closed stale deployment {stale_dseq}")
+            except Exception as cleanup_err:
+                _log(logging.ERROR, f"Stale deployment cleanup failed: {cleanup_err}")
+            # Retry once after cleanup
+            try:
+                deployment_response = client.create_deployment(sdl_content)
+            except RuntimeError as retry_err:
+                _log(logging.ERROR, f"Create deployment FAILED after retry: {retry_err}")
+                raise RuntimeError(
+                    f"Failed to create deployment after retry: {retry_err}"
+                ) from retry_err
+        else:
+            _log(logging.ERROR, f"Create deployment FAILED: {e}")
+            raise RuntimeError(f"Failed to create deployment: {e}") from e
 
     dseq = deployment_response.get("dseq")
     _manifest_raw = deployment_response.get("manifest", "")
