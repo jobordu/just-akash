@@ -358,3 +358,88 @@ def test_exec_propagates_non_auth_runtime_error_from_jwt_fetch_on_retry():
             transport.exec("test")
 
     assert mock_connect.call_count == 1
+
+
+def test_exec_loop_proxy_error_with_token_keyword_silently_retries():
+    """A proxy error message containing 'token' is treated as auth-expiry and retried.
+
+    _exec_loop catches RuntimeError and calls _is_auth_expiry_message(str(exc)).
+    If the proxy sends {"type": "error", "message": "invalid token format"},
+    _recv_proxy_message raises RuntimeError("Proxy error: invalid token format").
+    Because "token" is in the message, _is_auth_expiry_message returns True,
+    and the loop silently retries instead of propagating the error.
+
+    This tests whether that behavior is intentional: a non-auth proxy error
+    that happens to contain the word "token" will exhaust all reconnect
+    attempts rather than failing immediately.
+    """
+    config = TransportConfig(dseq="123", api_key="key", deployment=DEPLOYMENT_FIXTURE)
+    transport = LeaseShellTransport(config)
+    transport.prepare()
+
+    proxy_error_msg = json.dumps({"type": "error", "message": "invalid token format"})
+
+    class FakeWSProxyError:
+        def recv(self, timeout=None):
+            return proxy_error_msg  # string frame triggers _recv_proxy_message JSON path
+
+        def send(self, data):
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            pass
+
+    with (
+        patch.object(transport, "_fetch_jwt", return_value="jwt") as mock_jwt,
+        patch("just_akash.transport.lease_shell.connect") as mock_connect,
+    ):
+        mock_connect.side_effect = [FakeWSProxyError() for _ in range(MAX_RECONNECT_ATTEMPTS + 1)]
+
+        with pytest.raises(RuntimeError, match="Failed to re-authenticate"):
+            transport.exec("echo test")
+
+    # The proxy error contained "token" so it was treated as auth expiry and retried
+    # all MAX_RECONNECT_ATTEMPTS times rather than failing on the first attempt.
+    assert mock_jwt.call_count == MAX_RECONNECT_ATTEMPTS
+
+
+def test_exec_loop_non_auth_runtime_error_from_proxy_propagates_immediately():
+    """A RuntimeError from _recv_proxy_message that does NOT contain auth keywords
+    must propagate immediately without retrying.
+
+    This confirms that only auth-related RuntimeErrors trigger reconnection.
+    """
+    config = TransportConfig(dseq="123", api_key="key", deployment=DEPLOYMENT_FIXTURE)
+    transport = LeaseShellTransport(config)
+    transport.prepare()
+
+    proxy_error_msg = json.dumps({"type": "error", "message": "deployment not found"})
+
+    class FakeWSProxyError:
+        def recv(self, timeout=None):
+            return proxy_error_msg
+
+        def send(self, data):
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            pass
+
+    with (
+        patch.object(transport, "_fetch_jwt", return_value="jwt") as mock_jwt,
+        patch("just_akash.transport.lease_shell.connect") as mock_connect,
+    ):
+        mock_connect.return_value = FakeWSProxyError()
+
+        with pytest.raises(RuntimeError, match="Proxy error: deployment not found"):
+            transport.exec("echo test")
+
+    # Must fail on first attempt, no retries
+    assert mock_jwt.call_count == 1
+    assert mock_connect.call_count == 1

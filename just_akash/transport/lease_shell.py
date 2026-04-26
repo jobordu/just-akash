@@ -334,7 +334,7 @@ class LeaseShellTransport(Transport):
 
         parent = os.path.dirname(remote_path)
         if parent:
-            rc = self.exec(f"mkdir -p {shlex.quote(parent)}")
+            rc = self._exec_shell_command(f"mkdir -p {shlex.quote(parent)}")
             if rc != 0:
                 raise RuntimeError(f"Failed to create directory for {remote_path}: exit {rc}")
 
@@ -344,7 +344,7 @@ class LeaseShellTransport(Transport):
         if rc != 0:
             raise RuntimeError(f"Failed to write {remote_path}: exit {rc}")
 
-        rc = self.exec(f"chmod 600 {shlex.quote(remote_path)}")
+        rc = self._exec_shell_command(f"chmod 600 {shlex.quote(remote_path)}")
         if rc != 0:
             raise RuntimeError(f"Failed to set permissions on {remote_path}: exit {rc}")
 

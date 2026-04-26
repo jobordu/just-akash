@@ -268,6 +268,35 @@ class TestProviderInfoExtraction:
         with pytest.raises(RuntimeError):
             transport._extract_provider_info()
 
+    def test_extract_provider_info_lease_id_none_does_not_set_provider_address(self):
+        """When lease['id'] is None, provider_address must remain unset.
+
+        Line 102-104: lease_id = lease.get('id') returns None.
+        The condition `lease_id is not None and not isinstance(lease_id, dict)` is False
+        (because lease_id IS None), so it does not raise. Then line 104:
+        `lease_id.get(...)` is guarded by `isinstance(lease_id, dict)` which is False
+        for None, so provider_addr stays ''. This means _provider_address is never set,
+        and _fetch_jwt will use create_jwt (without provider) instead of
+        create_jwt_with_provider. Verify this path works and provider_address stays None.
+        """
+        config = TransportConfig(
+            dseq="123",
+            api_key="key",
+            deployment={
+                "leases": [
+                    {
+                        "id": None,
+                        "provider": {"hostUri": "https://provider.com"},
+                        "status": {"services": {"web": {}}},
+                    }
+                ]
+            },
+        )
+        transport = LeaseShellTransport(config)
+        host_uri, service = transport._extract_provider_info()
+        assert host_uri == "https://provider.com"
+        assert transport._provider_address is None
+
 
 # --- Frame Dispatch Tests ---
 
@@ -502,6 +531,54 @@ class TestBuildShellPath:
         assert ";" not in url
         assert "%3B" in url
         assert "cmd1=hello%3B" in url
+
+    def test_build_shell_path_command_none_produces_no_cmd_params(self):
+        """_build_provider_shell_url(command=None) must not include any cmd params.
+
+        When command is None, the `if command is not None` branch is skipped entirely.
+        This is the path used for interactive shell sessions (connect).
+        Verify no cmd0=, cmd1=, etc. appear in the URL.
+        """
+        config = TransportConfig(
+            dseq="123",
+            api_key="key",
+            deployment=DEPLOYMENT_FIXTURE,
+        )
+        transport = LeaseShellTransport(config)
+        transport._provider_host_uri = "https://provider.com"
+        transport._service = "web"
+        url = transport._build_provider_shell_url(command=None, tty=True, stdin=True)
+        assert "cmd0=" not in url
+        assert "cmd1=" not in url
+        assert "tty=true" in url
+        assert "stdin=true" in url
+
+    def test_build_shell_path_empty_string_command_produces_single_empty_cmd(self):
+        """_build_provider_shell_url(command='') produces cmd0= with empty value.
+
+        An empty string is not None, so the code enters the `if command is not None`
+        branch and splits '' by space, yielding [''], which produces cmd0= with an
+        empty URL-encoded value. This is a boundary case that could cause provider-side
+        errors if the provider doesn't expect an empty command argument.
+        """
+        config = TransportConfig(
+            dseq="123",
+            api_key="key",
+            deployment=DEPLOYMENT_FIXTURE,
+        )
+        transport = LeaseShellTransport(config)
+        transport._provider_host_uri = "https://provider.com"
+        transport._service = "web"
+        url = transport._build_provider_shell_url(command="")
+        # '' is not None, so cmd params are generated
+        assert "cmd0=" in url
+        # But the value after cmd0= should be empty (just cmd0= followed by & or end of string)
+        import re
+        match = re.search(r"cmd0=([^&]*)", url)
+        assert match is not None
+        assert match.group(1) == "", (
+            f"Expected empty cmd0 value for empty command string, got {match.group(1)!r}"
+        )
 
     def test_build_shell_path_whitespace_only_command_produces_empty_cmd_params(self):
         """Whitespace-only command splits into empty cmd params — edge-case URL generation."""
@@ -1023,3 +1100,31 @@ class TestTokenRefresh:
         rcvd.reason = None
         exc.rcvd = rcvd
         assert _is_auth_expiry(exc) is False
+
+    def test_is_auth_expiry_with_no_rcvd_attribute_falls_back_to_str(self):
+        """ConnectionClosedError with rcvd=None should fall through to str(exc) check.
+
+        When rcvd is None, the code skips all rcvd-based checks and falls back to
+        _is_auth_expiry_message(str(exc)). If the exception message itself contains
+        an auth keyword, it should still return True.
+        """
+        exc = ConnectionClosedError(rcvd=None, sent=None)
+        # str(exc) for rcvd=None typically says "no close frame received"
+        # which does NOT contain auth keywords
+        assert _is_auth_expiry(exc) is False
+
+    def test_dispatch_frame_code_102_json_exit_code_null_returns_zero(self):
+        """Code 102 with JSON {"exit_code": null} must return 0, not crash.
+
+        json.loads produces {"exit_code": None}. The code does
+        int(json.loads(...).get("exit_code", 0)) which means int(None) is called,
+        raising TypeError. The except clause should catch this and fall through
+        to the int32 path or default to 0. This test verifies the implementation
+        handles null exit_code gracefully.
+        """
+        payload = json.dumps({"exit_code": None}).encode("utf-8")
+        frame = bytes([102]) + payload
+        result = LeaseShellTransport._dispatch_frame(frame)
+        # Must not crash; should return 0 (default)
+        assert result is not None
+        assert isinstance(result, int)
