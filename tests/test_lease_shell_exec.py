@@ -1115,7 +1115,7 @@ class TestTokenRefresh:
         """When rcvd is None and str(exc) contains auth keywords, returns True."""
         exc = MagicMock(spec=ConnectionClosedError)
         exc.rcvd = None
-        exc.__str__ = lambda self: "websocket closed: token expired"
+        exc.__str__ = MagicMock(return_value="websocket closed: token expired")
         assert _is_auth_expiry(exc) is True
 
     def test_dispatch_frame_code_102_json_exit_code_null_returns_zero(self):
