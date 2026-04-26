@@ -1105,17 +1105,18 @@ class TestTokenRefresh:
         exc.rcvd = rcvd
         assert _is_auth_expiry(exc) is False
 
-    def test_is_auth_expiry_with_no_rcvd_attribute_falls_back_to_str(self):
-        """ConnectionClosedError with rcvd=None should fall through to str(exc) check.
-
-        When rcvd is None, the code skips all rcvd-based checks and falls back to
-        _is_auth_expiry_message(str(exc)). If the exception message itself contains
-        an auth keyword, it should still return True.
-        """
+    def test_is_auth_expiry_with_no_rcvd_falls_back_to_str_negative(self):
+        """When rcvd is None and str(exc) has no auth keywords, returns False."""
         exc = ConnectionClosedError(rcvd=None, sent=None)
-        # str(exc) for rcvd=None typically says "no close frame received"
-        # which does NOT contain auth keywords
+        # str(exc) for rcvd=None says "no close frame received" — no auth keywords
         assert _is_auth_expiry(exc) is False
+
+    def test_is_auth_expiry_with_no_rcvd_falls_back_to_str_positive(self):
+        """When rcvd is None and str(exc) contains auth keywords, returns True."""
+        exc = MagicMock(spec=ConnectionClosedError)
+        exc.rcvd = None
+        exc.__str__ = lambda self: "websocket closed: token expired"
+        assert _is_auth_expiry(exc) is True
 
     def test_dispatch_frame_code_102_json_exit_code_null_returns_zero(self):
         """Code 102 with JSON {"exit_code": null} must return 0, not crash.
