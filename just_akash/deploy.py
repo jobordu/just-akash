@@ -66,19 +66,25 @@ def _inject_env_into_sdl(sdl_content: str, env_vars: list[str]) -> str:
     if not env_vars:
         return sdl_content
     override_keys = {v.split("=", 1)[0] for v in env_vars}
-    lines = sdl_content.splitlines(keepends=True)
-    sdl_content = "".join(
-        line
-        for line in lines
-        if not any(re.match(r"\s*- " + re.escape(key) + r"=", line) for key in override_keys)
-    )
     env_match = re.search(r"^(\s+)env:\s*\n", sdl_content, re.MULTILINE)
     if env_match:
         indent = env_match.group(1)
         entry_indent = indent + "  "
-        insert_pos = env_match.end()
+        block_start = env_match.end()
+        remaining = sdl_content[block_start:]
+        lines = remaining.splitlines(keepends=True)
+        kept = []
+        consumed = 0
+        for line in lines:
+            stripped = line.rstrip("\n")
+            if stripped and not stripped.startswith(entry_indent):
+                break
+            consumed += len(line)
+            if any(re.match(r"\s*- " + re.escape(key) + r"=", line) for key in override_keys):
+                continue
+            kept.append(line)
         new_entries = "".join(f"{entry_indent}- {var}\n" for var in env_vars)
-        return sdl_content[:insert_pos] + new_entries + sdl_content[insert_pos:]
+        return sdl_content[:block_start] + new_entries + "".join(kept) + remaining[consumed:]
     expose_match = re.search(r"^(\s+)expose:\s*\n", sdl_content, re.MULTILINE)
     if expose_match:
         indent = expose_match.group(1)
