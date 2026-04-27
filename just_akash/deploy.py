@@ -65,6 +65,13 @@ def _log_bid_table(bids: list, label: str):
 def _inject_env_into_sdl(sdl_content: str, env_vars: list[str]) -> str:
     if not env_vars:
         return sdl_content
+    override_keys = {v.split("=", 1)[0] for v in env_vars}
+    lines = sdl_content.splitlines(keepends=True)
+    sdl_content = "".join(
+        line
+        for line in lines
+        if not any(re.match(r"\s*- " + re.escape(key) + r"=", line) for key in override_keys)
+    )
     env_match = re.search(r"^(\s+)env:\s*\n", sdl_content, re.MULTILINE)
     if env_match:
         indent = env_match.group(1)
