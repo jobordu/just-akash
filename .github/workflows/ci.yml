@@ -61,7 +61,9 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ~/.cache/pyright
-          key: pyright-${{ runner.os }}-${{ hashFiles('**/pyproject.toml') }}
+          key: pyright-${{ runner.os }}-${{ hashFiles('**/pyproject.toml', '**/uv.lock') }}
+          restore-keys: |
+            pyright-${{ runner.os }}-
 
       - name: Pyright type check
         run: uv run pyright
