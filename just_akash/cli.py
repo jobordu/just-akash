@@ -221,6 +221,13 @@ def main():
     )
     test_p.add_argument("--ssh", action="store_true", help="Verify SSH connectivity")
 
+    # ── validate-sdl ───────────────────────────────────
+    validate_p = subparsers.add_parser(
+        "validate-sdl",
+        help="Check an SDL against project rules without deploying",
+    )
+    validate_p.add_argument("sdl", help="Path to SDL file")
+
     args = parser.parse_args()
 
     if not args.command:
@@ -546,6 +553,23 @@ def main():
         from .test_lifecycle import main as test_main
 
         test_main()
+
+    # ── validate-sdl ───────────────────────────────────
+    elif args.command == "validate-sdl":
+        from pathlib import Path
+
+        from .sdl_validate import SDLValidationError, validate_sdl
+
+        sdl_path = Path(args.sdl)
+        if not sdl_path.exists():
+            print(f"Error: SDL file not found: {sdl_path}", file=sys.stderr)
+            sys.exit(1)
+        try:
+            validate_sdl(sdl_path.read_text())
+        except SDLValidationError as e:
+            print(str(e), file=sys.stderr)
+            sys.exit(1)
+        print(f"OK: {sdl_path}")
 
 
 if __name__ == "__main__":

@@ -14,6 +14,7 @@ classifiers = [
 dependencies = [
     "websockets>=16.0",
     "pexpect>=4.9.0",
+    "pyyaml>=6.0",
 ]
 
 [project.scripts]
@@ -45,4 +46,5 @@ dev = [
     "pyright>=1.1.399",
     "ruff>=0.15.10",
     "types-pexpect>=4.9.0.20260127",
+    "types-pyyaml>=6.0",
 ]

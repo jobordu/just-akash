@@ -25,6 +25,7 @@ from .api import (
     _extract_bid_price,
     _extract_provider,
 )
+from .sdl_validate import SDLValidationError, validate_sdl
 
 logger = logging.getLogger("akash.deploy")
 
@@ -136,6 +137,13 @@ def deploy(
     with open(sdl_path_obj) as f:
         sdl_content = f.read()
     _log(logging.DEBUG, f"SDL content length: {len(sdl_content)} bytes")
+
+    try:
+        validate_sdl(sdl_content)
+    except SDLValidationError as e:
+        _log(logging.ERROR, str(e))
+        raise RuntimeError(str(e)) from e
+    _log(logging.INFO, "SDL validation OK")
 
     if image:
         sdl_content = re.sub(
