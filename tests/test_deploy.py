@@ -44,7 +44,7 @@ services:
 
 SDL_WITH_SSH_PLACEHOLDER = SDL_YAML.replace(
     "image: python:3.13-slim",
-    "image: python:3.13-slim\n        env:\n          SSH_PUBKEY: PLACEHOLDER_SSH_PUBKEY_B64",
+    "image: python:3.13-slim\n    env:\n      - SSH_PUBKEY_B64=PLACEHOLDER_SSH_PUBKEY_B64",
 )
 
 
