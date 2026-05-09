@@ -561,11 +561,16 @@ def main():
         from .sdl_validate import SDLValidationError, validate_sdl
 
         sdl_path = Path(args.sdl)
-        if not sdl_path.exists():
+        if not sdl_path.is_file():
             print(f"Error: SDL file not found: {sdl_path}", file=sys.stderr)
             sys.exit(1)
         try:
-            validate_sdl(sdl_path.read_text())
+            sdl_text = sdl_path.read_text()
+        except OSError as e:
+            print(f"Error: cannot read {sdl_path}: {e}", file=sys.stderr)
+            sys.exit(1)
+        try:
+            validate_sdl(sdl_text)
         except SDLValidationError as e:
             print(str(e), file=sys.stderr)
             sys.exit(1)
