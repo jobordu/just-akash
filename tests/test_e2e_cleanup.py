@@ -34,7 +34,9 @@ def _reset_e2e_state():
 
 
 def _completed(
-    returncode: int = 0, stdout: str = "", stderr: str = ""
+    returncode: int = 0,
+    stdout: str | None = "",
+    stderr: str | None = "",
 ) -> subprocess.CompletedProcess:
     return subprocess.CompletedProcess(
         args=["mock"], returncode=returncode, stdout=stdout, stderr=stderr
@@ -527,7 +529,7 @@ class TestSignalHandlerSelectiveCleanup:
         monkeypatch.setattr(signal, "signal", lambda sig, h: handlers.__setitem__(sig, h))
 
         ref_a = {"dseq": "AAA"}
-        ref_done = {"dseq": "DONE"}
+        ref_done: dict = {"dseq": "DONE"}
         ref_b = {"dseq": "BBB"}
         install_signal_cleanup(ref_a)
         install_signal_cleanup(ref_done)
