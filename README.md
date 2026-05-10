@@ -114,7 +114,8 @@ uv run just-akash tag --dseq 12345 --name my-job
 | Variable | Required | Description |
 |---|---|---|
 | `AKASH_API_KEY` | Yes | Console API key |
-| `AKASH_PROVIDERS` | No | Comma-separated allowlist of provider addresses (empty = accept any) |
+| `AKASH_PROVIDERS` | No | Comma-separated allowlist of **preferred** provider addresses (empty = accept any) |
+| `AKASH_PROVIDERS_BACKUP` | No | Comma-separated allowlist of **backup** providers used only when no preferred bids arrive |
 | `SSH_PUBKEY` | For SSH SDL | SSH public key (injected into container) |
 | `AKASH_CONSOLE_URL` | No | Console API base URL (default: `https://console-api.akash.network`) |
 | `AKASH_DEBUG` | No | Set to `1` for verbose API/deploy logging |
@@ -143,12 +144,43 @@ just inject 12345 .env.secrets ssh      # force SSH
 
 ## Bid Selection
 
-Deployments use a two-phase bid polling strategy:
+Deployments use a three-phase tiered bid-selection state machine. Bids stream
+in from `t=0` regardless of tier (Akash's auction is open; the tier is a
+client-side filter).
 
-1. **Phase 1**: Wait `--bid-wait` seconds (default 60), then pick the cheapest bid
-2. **Phase 2**: If no bids received, wait `--bid-wait-retry` seconds (default 120) more
+| Phase | Window | Behavior on bid arrival | Decision at window end |
+|---|---|---|---|
+| 1. Preferred-only patience | `[0, T1]` (`--bid-wait`, default 60s) | Collect all bids; do not select yet | If any **preferred** bid collected → pick **cheapest preferred** and stop |
+| 2. Preferred-grace | `[T1, T1+T2]` (`--bid-wait-retry`, default 120s) | Continue collecting; the moment a **preferred** bid appears, accept it **immediately** (first-wins) | If still no preferred → fall through |
+| 3. Backup fallback | end of phase 2 | — | Pick **cheapest backup** from bids collected across phases 1+2 |
 
-Both timeouts are configurable via CLI flags or `just` recipe overrides.
+Properties:
+
+- **Cheapest-when-healthy.** Preferred providers responsive → cheapest preferred wins.
+- **Bounded patience.** Preferred slow but alive → wait at most `T1+T2`, then snap to first preferred.
+- **Graceful degradation.** Preferred fully down → cheapest backup wins, no extra round trip.
+
+### Tiered providers
+
+Two tiers configure which providers are eligible:
+
+```bash
+# env-var form
+export AKASH_PROVIDERS=akash1pref1,akash1pref2          # preferred (tier 1)
+export AKASH_PROVIDERS_BACKUP=akash1back1,akash1back2   # backup (tier 2)
+
+# CLI override (repeatable, overrides env when set)
+uv run just-akash deploy \
+  --provider akash1pref1 --provider akash1pref2 \
+  --backup-provider akash1back1
+```
+
+When `AKASH_PROVIDERS_BACKUP` is unset, deploy behaves identically to the
+single-tier allowlist (zero regression). With no allowlist at all (neither
+preferred nor backup), the cheapest bid from any provider wins.
+
+Each bid is tagged in the log as `[PREFERRED]`, `[BACKUP]`, or `[FOREIGN]`,
+and the selection log line names which phase chose the winner.
 
 ## Logs
 

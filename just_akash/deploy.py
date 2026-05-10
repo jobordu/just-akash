@@ -5,10 +5,15 @@ Multi-step Akash deployment orchestrator.
 Workflow:
 1. Read SDL file
 2. Create deployment via Console API
-3. Poll for bids (two-phase: bid_wait, then bid_wait_retry)
-4. Select cheapest bid
-5. Create lease with provider
-6. Return deployment DSEQ and lease details
+3. Poll for bids using a 3-phase tiered selection state machine:
+   - Phase 1 (preferred-only patience, [0, T1]): collect bids; pick cheapest
+     preferred at end of window if any.
+   - Phase 2 (preferred-grace, [T1, T1+T2]): continue collecting; the moment a
+     preferred bid appears, accept it immediately (first-wins).
+   - Phase 3 (backup fallback): pick cheapest backup from bids collected across
+     phases 1+2.
+4. Create lease with the selected provider.
+5. Return deployment DSEQ and lease details.
 """
 
 import json
@@ -45,7 +50,26 @@ def _fmt_price(bid) -> str:
     return f"{amount} {denom}"
 
 
-def _log_bid_table(bids: list, label: str):
+def _classify_bid(provider: str, preferred: list[str], backup: list[str]) -> str:
+    """Tag a bid by tier. With no allowlist set, every bid is ACCEPTED."""
+    if not preferred and not backup:
+        return "ACCEPTED"
+    if provider and provider in preferred:
+        return "PREFERRED"
+    if provider and provider in backup:
+        return "BACKUP"
+    return "FOREIGN"
+
+
+def _log_bid_table(
+    bids: list,
+    label: str,
+    preferred: list[str] | None = None,
+    backup: list[str] | None = None,
+):
+    preferred = preferred or []
+    backup = backup or []
+    has_allowlist = bool(preferred or backup)
     if not bids:
         _log(logging.INFO, f"  {label}: (none)")
         return
@@ -57,9 +81,12 @@ def _log_bid_table(bids: list, label: str):
         provider = _extract_provider(b) or "unknown"
         _nested = b.get("bid", {})
         state = b.get("state", _nested.get("state", "?") if isinstance(_nested, dict) else "?")
+        suffix = ""
+        if has_allowlist:
+            suffix = f"  [{_classify_bid(provider, preferred, backup)}]"
         _log(
             logging.INFO,
-            f"    [{i + 1}] provider={provider}  price={_fmt_price(b)}  state={state}",
+            f"    [{i + 1}] provider={provider}  price={_fmt_price(b)}  state={state}{suffix}",
         )
 
 
@@ -98,6 +125,14 @@ def _inject_env_into_sdl(sdl_content: str, env_vars: list[str]) -> str:
     return sdl_content
 
 
+def _resolve_tier(arg_value: list[str] | None, env_name: str) -> list[str]:
+    """CLI args (when not None) override env var; trim & drop empties."""
+    if arg_value is not None:
+        return [p.strip() for p in arg_value if p and p.strip()]
+    raw = os.environ.get(env_name, "")
+    return [a.strip() for a in raw.split(",") if a.strip()]
+
+
 def deploy(
     sdl_path: str,
     gpu: bool = False,
@@ -105,6 +140,8 @@ def deploy(
     bid_wait: int = 60,
     bid_wait_retry: int = 120,
     env_vars: list[str] | None = None,
+    preferred_providers: list[str] | None = None,
+    backup_providers: list[str] | None = None,
 ) -> dict:
     api_key = os.environ.get("AKASH_API_KEY")
     if not api_key:
@@ -115,17 +152,20 @@ def deploy(
 
     client = AkashConsoleAPI(api_key)
 
-    providers_env = os.environ.get("AKASH_PROVIDERS", "")
-    allowed = [a.strip() for a in providers_env.split(",") if a.strip()]
+    preferred = _resolve_tier(preferred_providers, "AKASH_PROVIDERS")
+    backup = _resolve_tier(backup_providers, "AKASH_PROVIDERS_BACKUP")
+    has_allowlist = bool(preferred or backup)
 
     _log(
         logging.INFO,
         f"CONFIG  sdl={sdl_path}  gpu={gpu}  image={image or '(default)'}  "
         f"bid_wait={bid_wait}s  bid_wait_retry={bid_wait_retry}s",
     )
-    if allowed:
-        _log(logging.INFO, f"ALLOWED_PROVIDERS ({len(allowed)}): {allowed}")
-    else:
+    if preferred:
+        _log(logging.INFO, f"PREFERRED_PROVIDERS ({len(preferred)}): {preferred}")
+    if backup:
+        _log(logging.INFO, f"BACKUP_PROVIDERS ({len(backup)}): {backup}")
+    if not has_allowlist:
         _log(logging.INFO, "ALLOWED_PROVIDERS: (any — no allowlist set)")
 
     # Step 1: Read SDL file
@@ -224,124 +264,168 @@ def deploy(
         f"Full deployment response: {json.dumps(deployment_response, default=str)[:500]}",
     )
 
-    # Step 3: Poll for bids — wait bid_wait then pick cheapest;
-    #          if no bids, wait bid_wait_retry more
+    # Step 3: 3-phase bid polling and selection.
     _log(
         logging.INFO,
-        f"STEP 3: Polling for bids (wait {bid_wait}s, then pick cheapest; "
-        f"if none, wait {bid_wait_retry}s more)...",
+        f"STEP 3: Polling for bids (3-phase: preferred-only [{bid_wait}s] → "
+        f"preferred-grace [{bid_wait_retry}s] → backup fallback)...",
     )
     start_time = time.time()
-    bids = []
+    bids: list = []
     poll_count = 0
     last_bid_count = -1
 
-    def _poll_bids(deadline):
-        nonlocal bids, poll_count, last_bid_count
-        while time.time() < deadline:
-            poll_count += 1
-            elapsed = int(time.time() - start_time)
-            try:
-                bids = client.get_bids(str(dseq))
-                current_count = len(bids)
-            except RuntimeError as e:
-                _log(
-                    logging.WARNING,
-                    f"  poll #{poll_count} @ {elapsed}s: API error: {e}",
-                )
-                print(
-                    f"\r  Waiting for bids... {elapsed}s (poll #{poll_count})",
-                    end="",
-                    flush=True,
-                )
-                time.sleep(5)
+    def _has_preferred_bid(current: list) -> bool:
+        for b in current:
+            if not isinstance(b, dict):
                 continue
+            p = _extract_provider(b) or ""
+            if _classify_bid(p, preferred, backup) == "PREFERRED":
+                return True
+        return False
 
-            if current_count != last_bid_count:
-                last_bid_count = current_count
-                if current_count == 0:
-                    _log(logging.DEBUG, f"  poll #{poll_count} @ {elapsed}s: 0 bids")
-                else:
+    def _has_any_valid_bid(current: list) -> bool:
+        return any(isinstance(b, dict) for b in current)
+
+    def _do_poll() -> None:
+        """Performs one poll, updates `bids`, prints progress + diff log line."""
+        nonlocal poll_count, last_bid_count, bids
+        poll_count += 1
+        elapsed = int(time.time() - start_time)
+        try:
+            bids = client.get_bids(str(dseq))
+        except RuntimeError as e:
+            _log(
+                logging.WARNING,
+                f"  poll #{poll_count} @ {elapsed}s: API error: {e}",
+            )
+            print(
+                f"\r  Waiting for bids... {elapsed}s (poll #{poll_count})",
+                end="",
+                flush=True,
+            )
+            return
+
+        current_count = len(bids)
+        if current_count != last_bid_count:
+            last_bid_count = current_count
+            if current_count == 0:
+                _log(logging.DEBUG, f"  poll #{poll_count} @ {elapsed}s: 0 bids")
+            else:
+                _log(
+                    logging.INFO,
+                    f"  poll #{poll_count} @ {elapsed}s: {current_count} bid(s) received",
+                )
+                for i, b in enumerate(bids):
+                    if not isinstance(b, dict):
+                        continue
+                    p = _extract_provider(b) or "unknown"
+                    nested = b.get("bid", {})
+                    nested_state = nested.get("state", "?") if isinstance(nested, dict) else "?"
+                    s = b.get("state", nested_state)
+                    tag = _classify_bid(p, preferred, backup)
                     _log(
                         logging.INFO,
-                        f"  poll #{poll_count} @ {elapsed}s: {current_count} bid(s) received",
+                        f"    bid[{i}] provider={p}  price={_fmt_price(b)}  state={s}  [{tag}]",
                     )
-                    for i, b in enumerate(bids):
-                        if not isinstance(b, dict):
-                            continue
-                        p = _extract_provider(b) or "unknown"
-                        nested = b.get("bid", {})
-                        nested_state = (
-                            nested.get("state", "?") if isinstance(nested, dict) else "?"
-                        )
-                        s = b.get("state", nested_state)
-                        if allowed:
-                            in_allowlist = "ALLOWED" if p in allowed else "FOREIGN"
-                        else:
-                            in_allowlist = "ACCEPTED"
-                        _log(
-                            logging.INFO,
-                            f"    bid[{i}] provider={p}  "
-                            f"price={_fmt_price(b)}  state={s}  [{in_allowlist}]",
-                        )
 
-            if current_count > 0:
-                print(f"\r  {current_count} bid(s) received after {elapsed}s", flush=True)
-            else:
-                print(
-                    f"\r  Waiting for bids... {elapsed}s (poll #{poll_count})",
-                    end="",
-                    flush=True,
-                )
+        if current_count > 0:
+            print(f"\r  {current_count} bid(s) received after {elapsed}s", flush=True)
+        else:
+            print(
+                f"\r  Waiting for bids... {elapsed}s (poll #{poll_count})",
+                end="",
+                flush=True,
+            )
 
+    def _poll_until(deadline: float, early_exit=None) -> None:
+        while time.time() < deadline:
+            _do_poll()
+            if early_exit is not None and early_exit(bids):
+                return
             time.sleep(5)
 
-    _log(logging.INFO, f"  Phase 1: waiting {bid_wait}s for bids...")
-    _poll_bids(start_time + bid_wait)
+    phase1_deadline = start_time + bid_wait
+    phase2_deadline = phase1_deadline + bid_wait_retry
+
+    # Phase 1: preferred-only patience — collect bids for full T1 window.
+    _log(logging.INFO, f"  Phase 1 (preferred-only patience): waiting up to {bid_wait}s...")
+    _poll_until(phase1_deadline)
     print()
 
-    if not bids:
-        _log(
-            logging.WARNING,
-            f"No bids after {bid_wait}s — waiting {bid_wait_retry}s more...",
-        )
-        _poll_bids(start_time + bid_wait + bid_wait_retry)
-        print()
+    selected_bid = None
+    selection_phase = 0
 
-    if not bids:
-        _log(
-            logging.ERROR,
-            f"No bids after {poll_count} polls over {int(time.time() - start_time)}s",
-        )
-        _log(
-            logging.ERROR,
-            "Possible causes: SDL unsatisfiable, providers offline, network partition, "
-            "deposit too low, or no capacity on allowed providers",
-        )
-        _log(logging.INFO, f"Cleaning up deployment {dseq} (no bids)...")
-        try:
-            client.close_deployment(str(dseq))
-            _log(logging.INFO, f"Deployment {dseq} closed after no bids received")
-        except Exception as cleanup_err:
-            _log(logging.ERROR, f"Cleanup of deployment {dseq} failed: {cleanup_err}")
-        raise RuntimeError(
-            f"No bids received within {bid_wait + bid_wait_retry}s. "
-            "Your SDL may be unsatisfiable or all providers are busy."
-        )
+    def _filter_tier(current: list, tier: str) -> list:
+        return [
+            b
+            for b in current
+            if isinstance(b, dict)
+            and _classify_bid(_extract_provider(b) or "", preferred, backup) == tier
+        ]
 
-    _log(
-        logging.INFO,
-        f"Bid polling complete: {len(bids)} total bid(s) in {int(time.time() - start_time)}s",
-    )
-    _log_bid_table(bids, "ALL BIDS")
+    if has_allowlist:
+        preferred_phase1 = _filter_tier(bids, "PREFERRED")
+        if preferred_phase1:
+            selected_bid = min(preferred_phase1, key=lambda b: _extract_bid_price(b)[0])
+            selection_phase = 1
+    else:
+        accepted_phase1 = _filter_tier(bids, "ACCEPTED")
+        if accepted_phase1:
+            selected_bid = min(accepted_phase1, key=lambda b: _extract_bid_price(b)[0])
+            selection_phase = 1
 
-    if allowed:
+    # Phase 2: preferred-grace — only enter if no selection yet AND
+    # (backup tier configured OR no bids at all in phase 1). The "no bids"
+    # condition preserves today's retry behavior when backup is unset.
+    if selected_bid is None:
+        enter_phase2 = bool(backup) or len(bids) == 0
+        if enter_phase2:
+            label = "preferred-grace" if has_allowlist else "retry"
+            _log(
+                logging.WARNING,
+                f"  Phase 2 ({label}): no preferred bid yet — "
+                f"waiting up to {bid_wait_retry}s for first preferred...",
+            )
+            early_exit = _has_preferred_bid if has_allowlist else _has_any_valid_bid
+            _poll_until(phase2_deadline, early_exit=early_exit)
+            print()
+
+            if has_allowlist:
+                preferred_now = _filter_tier(bids, "PREFERRED")
+                if preferred_now:
+                    selected_bid = min(preferred_now, key=lambda b: _extract_bid_price(b)[0])
+                    selection_phase = 2
+            else:
+                accepted_now = _filter_tier(bids, "ACCEPTED")
+                if accepted_now:
+                    selected_bid = min(accepted_now, key=lambda b: _extract_bid_price(b)[0])
+                    selection_phase = 2
+
+    # Phase 3: cheapest backup fallback (across bids collected in phases 1+2).
+    if selected_bid is None and backup:
+        backup_bids_all = _filter_tier(bids, "BACKUP")
+        if backup_bids_all:
+            selected_bid = min(backup_bids_all, key=lambda b: _extract_bid_price(b)[0])
+            selection_phase = 3
+
+    elapsed_total = int(time.time() - start_time)
+
+    # Post-polling diagnostics (run regardless of selection outcome): warn for
+    # allowlisted providers that did not bid, mirroring legacy behavior so
+    # operators see on-chain status even when selection ultimately fails.
+    if has_allowlist and bids:
         bidding_providers = {_extract_provider(b) for b in bids if _extract_provider(b)}
-        no_bid_from = [p for p in allowed if p not in bidding_providers]
+        all_allowed = preferred + backup
+        no_bid_from = [p for p in all_allowed if p not in bidding_providers]
         if no_bid_from:
-            _log(logging.WARNING, f"NO BID FROM {len(no_bid_from)} allowed provider(s):")
+            _log(
+                logging.WARNING,
+                f"NO BID FROM {len(no_bid_from)} allowlisted provider(s):",
+            )
             for p in no_bid_from:
-                _log(logging.WARNING, f"  {p}")
+                tier = "preferred" if p in preferred else "backup"
+                _log(logging.WARNING, f"  {p} ({tier})")
                 try:
                     prov_info = client.get_provider(p)
                     if prov_info:
@@ -374,38 +458,32 @@ def deploy(
                 except RuntimeError as e:
                     _log(logging.WARNING, f"    on-chain status: query failed: {e}")
 
-    # Step 4: Filter bids to allowed providers
-    _log(logging.INFO, "STEP 4: Filtering bids...")
-    if allowed:
-        our_bids = [b for b in bids if isinstance(b, dict) and _extract_provider(b) in allowed]
-        foreign_bids = [
-            b for b in bids if isinstance(b, dict) and _extract_provider(b) not in allowed
-        ]
-
-        _log_bid_table(our_bids, "ALLOWED PROVIDERS")
-        _log_bid_table(foreign_bids, "FOREIGN (rejected)")
-
-        if not our_bids:
-            foreign = [_extract_provider(b) or "unknown" for b in bids]
-            _log(logging.ERROR, f"All {len(bids)} bid(s) are from non-allowed providers")
-            _log(logging.ERROR, f"  Allowed: {allowed}")
-            _log(logging.ERROR, f"  Received from: {foreign}")
-            _log(logging.INFO, f"Cleaning up deployment {dseq} (foreign bids only)...")
+    # Failure paths.
+    if selected_bid is None:
+        if not bids:
+            _log(
+                logging.ERROR,
+                f"No bids after {poll_count} polls over {elapsed_total}s",
+            )
+            _log(
+                logging.ERROR,
+                "Possible causes: SDL unsatisfiable, providers offline, "
+                "network partition, deposit too low, or no capacity on "
+                "allowed providers",
+            )
+            _log(logging.INFO, f"Cleaning up deployment {dseq} (no bids)...")
             try:
                 client.close_deployment(str(dseq))
-                _log(logging.INFO, f"Deployment {dseq} closed after foreign bids rejection")
+                _log(logging.INFO, f"Deployment {dseq} closed after no bids received")
             except Exception as cleanup_err:
                 _log(logging.ERROR, f"Cleanup of deployment {dseq} failed: {cleanup_err}")
             raise RuntimeError(
-                f"Received {len(bids)} bid(s) but NONE from our providers.\n"
-                f"  Allowed: {allowed}\n"
-                f"  Received from: {foreign}\n"
-                "Check that your providers are online and have capacity."
+                f"No bids received within {bid_wait + bid_wait_retry}s. "
+                "Your SDL may be unsatisfiable or all providers are busy."
             )
-    else:
-        our_bids = [b for b in bids if isinstance(b, dict)]
-        _log_bid_table(our_bids, "ALL BIDS (no allowlist)")
-        if not our_bids:
+        # Bids exist but none from preferred or backup tiers.
+        valid_bids = [b for b in bids if isinstance(b, dict)]
+        if has_allowlist and not valid_bids:
             _log(logging.ERROR, f"All {len(bids)} bid(s) are invalid (non-dict entries)")
             _log(logging.INFO, f"Cleaning up deployment {dseq} (no valid bids)...")
             try:
@@ -413,17 +491,94 @@ def deploy(
             except Exception as cleanup_err:
                 _log(logging.ERROR, f"Cleanup of deployment {dseq} failed: {cleanup_err}")
             raise RuntimeError("No valid bids received — all bid entries were malformed.")
+        foreign = [_extract_provider(b) or "unknown" for b in bids]
+        allowed_all = preferred + backup
+        _log(logging.ERROR, f"All {len(bids)} bid(s) are from non-allowed providers")
+        _log(logging.ERROR, f"  Preferred: {preferred}")
+        _log(logging.ERROR, f"  Backup:    {backup}")
+        _log(logging.ERROR, f"  Received from: {foreign}")
+        _log(logging.INFO, f"Cleaning up deployment {dseq} (foreign bids only)...")
+        try:
+            client.close_deployment(str(dseq))
+            _log(logging.INFO, f"Deployment {dseq} closed after foreign bids rejection")
+        except Exception as cleanup_err:
+            _log(logging.ERROR, f"Cleanup of deployment {dseq} failed: {cleanup_err}")
+        raise RuntimeError(
+            f"Received {len(bids)} bid(s) but NONE from our providers.\n"
+            f"  Preferred: {preferred}\n"
+            f"  Backup:    {backup}\n"
+            f"  Received from: {foreign}\n"
+            "Check that your providers are online and have capacity. "
+            f"Allowed total: {allowed_all}"
+        )
 
-    # Step 5: Select cheapest bid
-    _log(logging.INFO, "STEP 5: Selecting cheapest bid from allowed providers...")
-    for i, b in enumerate(sorted(our_bids, key=lambda b: _extract_bid_price(b)[0])):
+    # Selection success — log full bid table & per-tier breakdown.
+    _log(
+        logging.INFO,
+        f"Bid polling complete: {len(bids)} total bid(s) in {elapsed_total}s",
+    )
+    _log_bid_table(bids, "ALL BIDS", preferred=preferred, backup=backup)
+
+    # Step 4: per-tier bid tables.
+    _log(logging.INFO, "STEP 4: Bid tier breakdown...")
+    if has_allowlist:
+        _log_bid_table(
+            _filter_tier(bids, "PREFERRED"),
+            "PREFERRED PROVIDERS",
+            preferred=preferred,
+            backup=backup,
+        )
+        if backup:
+            _log_bid_table(
+                _filter_tier(bids, "BACKUP"),
+                "BACKUP PROVIDERS",
+                preferred=preferred,
+                backup=backup,
+            )
+        _log_bid_table(
+            _filter_tier(bids, "FOREIGN"),
+            "FOREIGN (rejected)",
+            preferred=preferred,
+            backup=backup,
+        )
+    else:
+        _log_bid_table(
+            [b for b in bids if isinstance(b, dict)],
+            "ALL BIDS (no allowlist)",
+            preferred=preferred,
+            backup=backup,
+        )
+
+    # Step 5: announce selection (already chosen by state machine).
+    phase_label = {
+        1: "phase 1: cheapest preferred",
+        2: "phase 2: first preferred (grace)",
+        3: "phase 3: cheapest backup (fallback)",
+    }
+    _log(
+        logging.INFO,
+        f"STEP 5: Selection made via {phase_label[selection_phase]}",
+    )
+    # Show a compact ranking of the tier from which the winner came.
+    if selection_phase == 3:
+        ranking_pool = _filter_tier(bids, "BACKUP")
+        ranking_label = "BACKUP"
+    elif has_allowlist:
+        ranking_pool = _filter_tier(bids, "PREFERRED")
+        ranking_label = "PREFERRED"
+    else:
+        ranking_pool = [b for b in bids if isinstance(b, dict)]
+        ranking_label = "ALL"
+    for i, b in enumerate(sorted(ranking_pool, key=lambda b: _extract_bid_price(b)[0])):
         p = _extract_provider(b) or "unknown"
-        marker = " <-- SELECTED" if i == 0 else ""
-        _log(logging.INFO, f"  rank[{i + 1}] provider={p}  price={_fmt_price(b)}{marker}")
+        marker = " <-- SELECTED" if b is selected_bid else ""
+        _log(
+            logging.INFO,
+            f"  {ranking_label} rank[{i + 1}] provider={p}  price={_fmt_price(b)}{marker}",
+        )
 
-    cheapest_bid = min(our_bids, key=lambda b: _extract_bid_price(b)[0])
-    provider = _extract_provider(cheapest_bid) or ""
-    price_amount, price_denom = _extract_bid_price(cheapest_bid)
+    provider = _extract_provider(selected_bid) or ""
+    price_amount, price_denom = _extract_bid_price(selected_bid)
 
     if not provider:
         _log(logging.INFO, f"Cleaning up deployment {dseq} (no provider in bid)...")
@@ -436,7 +591,8 @@ def deploy(
 
     _log(
         logging.INFO,
-        f"SELECTED  provider={provider}  price={price_amount} {price_denom}",
+        f"SELECTED  provider={provider}  price={price_amount} {price_denom}  "
+        f"({phase_label[selection_phase]})",
     )
 
     # Step 6: Create lease
@@ -503,13 +659,13 @@ def deploy_main():
         "--bid-wait",
         type=int,
         default=60,
-        help="Seconds to wait for bids before picking cheapest (default: 60)",
+        help="Phase 1 (preferred-only) window seconds (default: 60)",
     )
     parser.add_argument(
         "--bid-wait-retry",
         type=int,
         default=120,
-        help="Seconds to wait for bids if none received after first phase (default: 120)",
+        help="Phase 2 (preferred-grace) window seconds (default: 120)",
     )
     parser.add_argument(
         "--env",
@@ -517,6 +673,20 @@ def deploy_main():
         dest="env_vars",
         default=[],
         help="KEY=VALUE env var to inject into SDL (repeatable, provider-visible)",
+    )
+    parser.add_argument(
+        "--provider",
+        action="append",
+        dest="preferred_providers",
+        default=None,
+        help="Preferred provider address (repeatable; overrides AKASH_PROVIDERS)",
+    )
+    parser.add_argument(
+        "--backup-provider",
+        action="append",
+        dest="backup_providers",
+        default=None,
+        help="Backup provider address (repeatable; overrides AKASH_PROVIDERS_BACKUP)",
     )
 
     args = parser.parse_args()
@@ -534,6 +704,8 @@ def deploy_main():
             bid_wait=args.bid_wait,
             bid_wait_retry=args.bid_wait_retry,
             env_vars=args.env_vars,
+            preferred_providers=args.preferred_providers,
+            backup_providers=args.backup_providers,
         )
         sys.exit(0)
     except RuntimeError as e:

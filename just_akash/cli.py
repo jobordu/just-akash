@@ -129,6 +129,20 @@ def main():
         default=[],
         help="KEY=VALUE env var to inject into SDL (repeatable, provider-visible)",
     )
+    deploy_p.add_argument(
+        "--provider",
+        action="append",
+        dest="preferred_providers",
+        default=None,
+        help="Preferred provider address (repeatable; overrides AKASH_PROVIDERS)",
+    )
+    deploy_p.add_argument(
+        "--backup-provider",
+        action="append",
+        dest="backup_providers",
+        default=None,
+        help="Backup provider address (repeatable; overrides AKASH_PROVIDERS_BACKUP)",
+    )
 
     # ── connect ────────────────────────────────────────
     connect_p = subparsers.add_parser(
@@ -248,6 +262,8 @@ def main():
                 bid_wait=args.bid_wait,
                 bid_wait_retry=args.bid_wait_retry,
                 env_vars=args.deploy_env_vars,
+                preferred_providers=args.preferred_providers,
+                backup_providers=args.backup_providers,
             )
             sys.exit(0)
         except RuntimeError as e:

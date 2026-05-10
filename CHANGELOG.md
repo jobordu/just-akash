@@ -6,6 +6,31 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [1.6.0] — 2026-05-10
+
+### Added
+- **Tiered provider selection** (issue #11): new `AKASH_PROVIDERS_BACKUP` env var and `--provider` / `--backup-provider` CLI flags. Three-phase bid-selection state machine — preferred-only patience → preferred-grace (first-wins) → backup fallback. Cheapest preferred wins when healthy; bounded `T1+T2` patience for slow preferred; cheapest backup wins when preferred fully unresponsive. Each bid tagged `[PREFERRED]` / `[BACKUP]` / `[FOREIGN]` in logs; selection log line names which phase chose the winner.
+- `.env.example` ships with 3 vetted preferred providers + 10 backup providers — `cp .env.example .env` gets tiered selection out of the box.
+- Tier-aware provider assertion in all three e2e tests: verifies the selected provider is in `AKASH_PROVIDERS ∪ AKASH_PROVIDERS_BACKUP`.
+- `just_akash/_e2e.py` shared cleanup module: `robust_destroy()` with retry + audit, SIGINT/SIGTERM-safe `install_signal_cleanup()`, tier resolution, provider classification.
+- Tests: 109 new (39 deploy state-machine + 70 cleanup helpers + e2e wiring); full suite at 653 tests, `just_akash/deploy.py` and `just_akash/_e2e.py` both at 100% line coverage.
+
+### Changed
+- **BME migration**: bid-price denom defaults from `uakt` (legacy) to `uact`. Bid responses pass through whatever denom they carry; only display fallbacks for malformed bids changed.
+- SDL pricing ceiling raised from 1000 → 10000 uact (more provider headroom; cheapest-wins still applies).
+- README: env-var table documents `AKASH_PROVIDERS_BACKUP`; new "Tiered providers" section with state-machine table.
+- All three e2e tests now wrap post-deploy work in `try/finally` (was missing in `test_lifecycle.py` and `test_secrets_e2e.py`); `robust_destroy` retries up to 3× and audits via `just list`.
+
+### Fixed
+- **Cleanup leak: substring DSEQ collision** in audit — `dseq="123"` falsely flagged a different deployment `"12345"` as lingering. Fixed via word-boundary regex (`_dseq_in_list_output`).
+- **Cleanup leak: `retries < 0` silently skipped destroy** but returned True from audit — caller saw "success", deployment lived on. Fixed via `retries = max(retries, 0)`.
+- **Cleanup leak: double `install_signal_cleanup` orphaned the first dseq_ref** — second call replaced the SIGINT handler, first deployment leaked on signal. Fixed via module-level `_REGISTERED_DSEQ_REFS` registry; signal handler iterates all registered refs; `signal.signal()` invoked exactly once.
+- **Cleanup leak: signal-handler reentrancy** — impatient double-Ctrl-C re-iterated the registry, multiplying destroy calls per ref. Fixed via `_HANDLER_RUNNING` guard with try/finally.
+- `_log_bid_table()` now safely handles non-dict bid entries when tier-tagging.
+
+### Acknowledgements
+Hardened against 4 real cleanup-leak bugs surfaced by the adversarial /nf:harden loop.
+
 ## [1.2.0] — 2026-04-12
 
 ### Added

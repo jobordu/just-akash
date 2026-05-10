@@ -50,8 +50,8 @@ profiles:
     akash:
       pricing:
         backtest:
-          denom: uakt
-          amount: 1000
+          denom: uact
+          amount: 10000
 
 deployment:
   backtest:

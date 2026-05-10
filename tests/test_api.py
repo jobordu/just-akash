@@ -83,18 +83,18 @@ class TestExtractBidPrice:
 
     def test_missing_denom(self):
         bid = {"price": {"amount": 25}}
-        assert _extract_bid_price(bid) == (25.0, "uakt")
+        assert _extract_bid_price(bid) == (25.0, "uact")
 
     def test_numeric_price(self):
         bid = {"price": 75}
-        assert _extract_bid_price(bid) == (75.0, "uakt")
+        assert _extract_bid_price(bid) == (75.0, "uact")
 
     def test_none_price(self):
         bid = {"price": None}
-        assert _extract_bid_price(bid) == (float("inf"), "uakt")
+        assert _extract_bid_price(bid) == (float("inf"), "uact")
 
     def test_empty_bid(self):
-        assert _extract_bid_price({}) == (float("inf"), "uakt")
+        assert _extract_bid_price({}) == (float("inf"), "uact")
 
 
 # ── _extract_ssh_info ───────────────────────────────

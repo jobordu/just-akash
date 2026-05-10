@@ -16,12 +16,20 @@ Usage:
     just test-secrets
 """
 
+import json as _json
 import os
 import re
 import subprocess
 import sys
 import tempfile
 import time
+
+from ._e2e import (
+    assert_provider_in_tiers,
+    install_signal_cleanup,
+    resolve_tiers,
+    robust_destroy,
+)
 
 GREEN = "\033[92m"
 RED = "\033[91m"
@@ -98,7 +106,7 @@ def _wait_for_ssh(ssh_key, ssh_host, ssh_port, max_attempts=18):
 
 def main():
     failures = []
-    dseq = None
+    dseq_ref: dict = {"dseq": None}
 
     print(f"\n{BOLD}{'=' * 60}{RESET}")
     print(f"{BOLD}  Akash Secrets Injection E2E Test{RESET}")
@@ -115,6 +123,8 @@ def main():
             log_fail(f"{var} not set")
             sys.exit(1)
 
+    preferred, backup, _ = resolve_tiers()
+
     ssh_key = os.environ.get("SSH_KEY_PATH")
     if not ssh_key:
         for candidate in [
@@ -128,6 +138,8 @@ def main():
         sys.exit(1)
     log_pass(f"SSH key: {ssh_key}")
 
+    install_signal_cleanup(dseq_ref)
+
     # ── Step 2: Deploy SSH instance ────────────────────
     log_step(2, "Deploy SSH instance")
 
@@ -135,232 +147,243 @@ def main():
     output = r.stdout + r.stderr
     print(output)
 
+    m = re.search(r"DSEQ[:\s]+(\d+)", output)
+    if m:
+        dseq_ref["dseq"] = m.group(1)
+
     if r.returncode != 0:
         log_fail("just up failed")
-        m = re.search(r"DSEQ[:\s]+(\d+)", output)
-        if m:
-            _cleanup(m.group(1))
+        if dseq_ref["dseq"]:
+            robust_destroy(dseq_ref["dseq"])
         _summary(["deploy: failed"])
         sys.exit(1)
 
-    m = re.search(r"DSEQ[:\s]+(\d+)", output)
-    if not m:
+    if not dseq_ref["dseq"]:
         log_fail("Could not parse DSEQ from output")
         _summary(["deploy: no dseq"])
         sys.exit(1)
 
-    dseq = m.group(1)
+    dseq = dseq_ref["dseq"]
     log_pass(f"Deployed: DSEQ={dseq}")
 
-    # ── Step 3: Wait for SSH readiness ─────────────────
-    log_step(3, f"Wait for SSH on DSEQ {dseq}")
-
-    log_info("Waiting 10s for lease propagation...")
-    time.sleep(10)
-
-    import json as _json
-
-    ssh_host = None
-    ssh_port = None
-    for _attempt in range(3):
-        r = run(f"uv run just-akash status --dseq {dseq} --json")
-        try:
-            status_data = _json.loads(r.stdout)
-            ssh_host = status_data.get("ssh_host")
-            ssh_port = str(status_data.get("ssh_port", ""))
-            if ssh_host and ssh_port:
-                break
-        except _json.JSONDecodeError:
-            pass
-        log_info(f"Status attempt {_attempt + 1}/3 — waiting for SSH info...")
-        time.sleep(5)
-
-    if not ssh_host or not ssh_port:
-        log_fail("Could not extract SSH endpoint from status")
-        _cleanup(dseq)
-        _summary(["ssh: no endpoint"])
-        sys.exit(1)
-    log_info(f"SSH endpoint: {ssh_host}:{ssh_port}")
-
-    if _wait_for_ssh(ssh_key, ssh_host, ssh_port):
-        log_pass("SSH is ready")
-    else:
-        log_fail("SSH failed to become ready")
-        failures.append("ssh: not ready")
-        _cleanup(dseq)
-        _summary(failures)
-        sys.exit(1)
-
-    # ── Step 4: Inject secrets via SSH ───────────────────
-    log_step(4, "Inject secrets via SSH")
-
-    test_secret_key = "E2E_TEST_SECRET"
-    test_secret_value = "akash-secrets-e2e-ok-1234"
-
-    fd, env_file = tempfile.mkstemp(suffix=".env", prefix="akash-test-secrets-")
     try:
-        with os.fdopen(fd, "w") as f:
-            f.write("# test secrets\n")
-            f.write(f"{test_secret_key}={test_secret_value}\n")
-            f.write("ANOTHER_VAR=hello_world\n")
+        # ── Step 3: Wait for SSH readiness + tier assertion ──────────
+        log_step(3, f"Wait for SSH + verify provider tier on DSEQ {dseq}")
 
-        inject_cmd = (
-            f"uv run just-akash inject --dseq {dseq} --env-file {env_file} --transport ssh"
-        )
-        log_info(f"Running: {inject_cmd}")
-        r = run(inject_cmd, timeout=60)
-        print(r.stdout)
-        if r.stderr:
-            print(r.stderr)
+        log_info("Waiting 10s for lease propagation...")
+        time.sleep(10)
 
-        if r.returncode != 0:
-            log_fail(f"Inject failed (exit {r.returncode}): {r.stderr.strip()}")
-            failures.append("inject: failed")
-        elif "Injected" in r.stdout:
-            log_pass("Secrets injected via SSH")
+        ssh_host = None
+        ssh_port = None
+        provider_addr = None
+        for _attempt in range(3):
+            r = run(f"uv run just-akash status --dseq {dseq} --json")
+            try:
+                status_data = _json.loads(r.stdout)
+                ssh_host = status_data.get("ssh_host")
+                ssh_port = str(status_data.get("ssh_port", ""))
+                provider_addr = status_data.get("provider")
+                if ssh_host and ssh_port:
+                    break
+            except _json.JSONDecodeError:
+                pass
+            log_info(f"Status attempt {_attempt + 1}/3 — waiting for SSH info...")
+            time.sleep(5)
+
+        if not assert_provider_in_tiers(provider_addr, preferred, backup):
+            failures.append("status: foreign or missing provider")
+
+        if not ssh_host or not ssh_port:
+            log_fail("Could not extract SSH endpoint from status")
+            failures.append("ssh: no endpoint")
+            return _finish(failures, dseq_ref)
+
+        log_info(f"SSH endpoint: {ssh_host}:{ssh_port}")
+
+        if _wait_for_ssh(ssh_key, ssh_host, ssh_port):
+            log_pass("SSH is ready")
         else:
-            log_fail(f"Unexpected inject output: {r.stdout.strip()}")
-            failures.append("inject: unexpected output")
-    finally:
-        os.unlink(env_file)
+            log_fail("SSH failed to become ready")
+            failures.append("ssh: not ready")
+            return _finish(failures, dseq_ref)
 
-    # ── Step 5: Verify secrets via SSH ─────────────────
-    log_step(5, "Verify secrets via SSH")
+        # ── Step 4: Inject secrets via SSH ───────────────────
+        log_step(4, "Inject secrets via SSH")
 
-    if "inject" not in [f.split(":")[0] for f in failures]:
-        verify_cmd = [
-            "ssh",
-            "-o",
-            "StrictHostKeyChecking=no",
-            "-o",
-            "UserKnownHostsFile=/dev/null",
-            "-o",
-            "BatchMode=yes",
-            "-i",
-            ssh_key,
-            "-p",
-            ssh_port,
-            f"root@{ssh_host}",
-            "cat /run/secrets/.env",
-        ]
+        test_secret_key = "E2E_TEST_SECRET"
+        test_secret_value = "akash-secrets-e2e-ok-1234"
+
+        fd, env_file = tempfile.mkstemp(suffix=".env", prefix="akash-test-secrets-")
         try:
-            result = subprocess.run(verify_cmd, capture_output=True, text=True, timeout=15)
-            secrets_content = result.stdout
+            with os.fdopen(fd, "w") as f:
+                f.write("# test secrets\n")
+                f.write(f"{test_secret_key}={test_secret_value}\n")
+                f.write("ANOTHER_VAR=hello_world\n")
 
-            if result.returncode != 0:
-                log_fail(f"SSH cat failed: {result.stderr.strip()}")
-                failures.append("verify: ssh cat failed")
-            elif test_secret_value in secrets_content:
-                log_pass(f"Found {test_secret_key}={test_secret_value} in /run/secrets/.env")
-
-                if "ANOTHER_VAR=hello_world" in secrets_content:
-                    log_pass("Found ANOTHER_VAR=hello_world")
-                else:
-                    log_fail("ANOTHER_VAR not found")
-                    failures.append("verify: missing ANOTHER_VAR")
-
-                verify_perms = [
-                    "ssh",
-                    "-o",
-                    "StrictHostKeyChecking=no",
-                    "-o",
-                    "UserKnownHostsFile=/dev/null",
-                    "-o",
-                    "BatchMode=yes",
-                    "-i",
-                    ssh_key,
-                    "-p",
-                    ssh_port,
-                    f"root@{ssh_host}",
-                    "stat -c '%a' /run/secrets/.env",
-                ]
-                perm_result = subprocess.run(
-                    verify_perms, capture_output=True, text=True, timeout=15
-                )
-                perms = perm_result.stdout.strip()
-                if perms == "600":
-                    log_pass("File permissions are 600")
-                else:
-                    log_info(f"File permissions: {perms} (expected 600)")
-            else:
-                log_fail("Secret value not found in /run/secrets/.env")
-                log_info(f"Content: {secrets_content[:200]}")
-                failures.append("verify: secret value missing")
-        except subprocess.TimeoutExpired:
-            log_fail("SSH verification timed out")
-            failures.append("verify: timeout")
-    else:
-        log_info("Skipping verification (inject failed)")
-
-    # ── Step 6: Cross-check: inject via lease-shell, verify via SSH ──
-    log_step(6, "Cross-check: inject via lease-shell, verify via SSH")
-
-    if "inject" not in [f.split(":")[0] for f in failures]:
-        ls_secret_value = "lease-shell-crosscheck-ok"
-        fd2, env_file2 = tempfile.mkstemp(suffix=".env", prefix="akash-test-ls-")
-        try:
-            with os.fdopen(fd2, "w") as f:
-                f.write(f"CROSSCHECK_KEY={ls_secret_value}\n")
-
-            remote_path2 = "/tmp/e2e-lease-shell-crosscheck.env"
-            inject_cmd2 = (
-                f"uv run just-akash inject --dseq {dseq} --env-file {env_file2}"
-                f" --remote-path {remote_path2} --transport lease-shell"
+            inject_cmd = (
+                f"uv run just-akash inject --dseq {dseq} --env-file {env_file} --transport ssh"
             )
-            log_info(f"Running: {inject_cmd2}")
-            r2 = run(inject_cmd2, timeout=30)
-            if r2.returncode != 0:
-                log_fail(f"Lease-shell inject failed (exit {r2.returncode}): {r2.stderr.strip()}")
-                failures.append("crosscheck: lease-shell inject failed")
-            else:
-                verify_crosscheck = [
-                    "ssh",
-                    "-o",
-                    "StrictHostKeyChecking=no",
-                    "-o",
-                    "UserKnownHostsFile=/dev/null",
-                    "-o",
-                    "BatchMode=yes",
-                    "-i",
-                    ssh_key,
-                    "-p",
-                    ssh_port,
-                    f"root@{ssh_host}",
-                    f"cat {remote_path2}",
-                ]
-                try:
-                    xr = subprocess.run(
-                        verify_crosscheck,
-                        capture_output=True,
-                        text=True,
-                        timeout=15,
-                    )
-                    if xr.returncode == 0 and ls_secret_value in xr.stdout:
-                        log_pass("Lease-shell inject verified via SSH — both transports work")
-                    else:
-                        log_fail(f"Cross-check verify failed: {xr.stderr.strip()}")
-                        log_info(f"Content: {xr.stdout[:200]}")
-                        failures.append("crosscheck: value missing")
-                except subprocess.TimeoutExpired:
-                    log_fail("Cross-check SSH verify timed out")
-                    failures.append("crosscheck: timeout")
-        finally:
-            os.unlink(env_file2)
-    else:
-        log_info("Skipping cross-check (inject failed)")
+            log_info(f"Running: {inject_cmd}")
+            r = run(inject_cmd, timeout=60)
+            print(r.stdout)
+            if r.stderr:
+                print(r.stderr)
 
-    # ── Step 7: Cleanup ────────────────────────────────
-    log_step(TOTAL_STEPS, f"Cleanup DSEQ {dseq}")
-    _cleanup(dseq)
-    log_pass("Deployment destroyed")
+            if r.returncode != 0:
+                log_fail(f"Inject failed (exit {r.returncode}): {r.stderr.strip()}")
+                failures.append("inject: failed")
+            elif "Injected" in r.stdout:
+                log_pass("Secrets injected via SSH")
+            else:
+                log_fail(f"Unexpected inject output: {r.stdout.strip()}")
+                failures.append("inject: unexpected output")
+        finally:
+            os.unlink(env_file)
+
+        # ── Step 5: Verify secrets via SSH ─────────────────
+        log_step(5, "Verify secrets via SSH")
+
+        if "inject" not in [f.split(":")[0] for f in failures]:
+            verify_cmd = [
+                "ssh",
+                "-o",
+                "StrictHostKeyChecking=no",
+                "-o",
+                "UserKnownHostsFile=/dev/null",
+                "-o",
+                "BatchMode=yes",
+                "-i",
+                ssh_key,
+                "-p",
+                ssh_port,
+                f"root@{ssh_host}",
+                "cat /run/secrets/.env",
+            ]
+            try:
+                result = subprocess.run(verify_cmd, capture_output=True, text=True, timeout=15)
+                secrets_content = result.stdout
+
+                if result.returncode != 0:
+                    log_fail(f"SSH cat failed: {result.stderr.strip()}")
+                    failures.append("verify: ssh cat failed")
+                elif test_secret_value in secrets_content:
+                    log_pass(f"Found {test_secret_key}={test_secret_value} in /run/secrets/.env")
+
+                    if "ANOTHER_VAR=hello_world" in secrets_content:
+                        log_pass("Found ANOTHER_VAR=hello_world")
+                    else:
+                        log_fail("ANOTHER_VAR not found")
+                        failures.append("verify: missing ANOTHER_VAR")
+
+                    verify_perms = [
+                        "ssh",
+                        "-o",
+                        "StrictHostKeyChecking=no",
+                        "-o",
+                        "UserKnownHostsFile=/dev/null",
+                        "-o",
+                        "BatchMode=yes",
+                        "-i",
+                        ssh_key,
+                        "-p",
+                        ssh_port,
+                        f"root@{ssh_host}",
+                        "stat -c '%a' /run/secrets/.env",
+                    ]
+                    perm_result = subprocess.run(
+                        verify_perms, capture_output=True, text=True, timeout=15
+                    )
+                    perms = perm_result.stdout.strip()
+                    if perms == "600":
+                        log_pass("File permissions are 600")
+                    else:
+                        log_info(f"File permissions: {perms} (expected 600)")
+                else:
+                    log_fail("Secret value not found in /run/secrets/.env")
+                    log_info(f"Content: {secrets_content[:200]}")
+                    failures.append("verify: secret value missing")
+            except subprocess.TimeoutExpired:
+                log_fail("SSH verification timed out")
+                failures.append("verify: timeout")
+        else:
+            log_info("Skipping verification (inject failed)")
+
+        # ── Step 6: Cross-check: inject via lease-shell, verify via SSH ──
+        log_step(6, "Cross-check: inject via lease-shell, verify via SSH")
+
+        if "inject" not in [f.split(":")[0] for f in failures]:
+            ls_secret_value = "lease-shell-crosscheck-ok"
+            fd2, env_file2 = tempfile.mkstemp(suffix=".env", prefix="akash-test-ls-")
+            try:
+                with os.fdopen(fd2, "w") as f:
+                    f.write(f"CROSSCHECK_KEY={ls_secret_value}\n")
+
+                remote_path2 = "/tmp/e2e-lease-shell-crosscheck.env"
+                inject_cmd2 = (
+                    f"uv run just-akash inject --dseq {dseq} --env-file {env_file2}"
+                    f" --remote-path {remote_path2} --transport lease-shell"
+                )
+                log_info(f"Running: {inject_cmd2}")
+                r2 = run(inject_cmd2, timeout=30)
+                if r2.returncode != 0:
+                    log_fail(
+                        f"Lease-shell inject failed (exit {r2.returncode}): {r2.stderr.strip()}"
+                    )
+                    failures.append("crosscheck: lease-shell inject failed")
+                else:
+                    verify_crosscheck = [
+                        "ssh",
+                        "-o",
+                        "StrictHostKeyChecking=no",
+                        "-o",
+                        "UserKnownHostsFile=/dev/null",
+                        "-o",
+                        "BatchMode=yes",
+                        "-i",
+                        ssh_key,
+                        "-p",
+                        ssh_port,
+                        f"root@{ssh_host}",
+                        f"cat {remote_path2}",
+                    ]
+                    try:
+                        xr = subprocess.run(
+                            verify_crosscheck,
+                            capture_output=True,
+                            text=True,
+                            timeout=15,
+                        )
+                        if xr.returncode == 0 and ls_secret_value in xr.stdout:
+                            log_pass("Lease-shell inject verified via SSH — both transports work")
+                        else:
+                            log_fail(f"Cross-check verify failed: {xr.stderr.strip()}")
+                            log_info(f"Content: {xr.stdout[:200]}")
+                            failures.append("crosscheck: value missing")
+                    except subprocess.TimeoutExpired:
+                        log_fail("Cross-check SSH verify timed out")
+                        failures.append("crosscheck: timeout")
+            finally:
+                os.unlink(env_file2)
+        else:
+            log_info("Skipping cross-check (inject failed)")
+    finally:
+        # ── Step 7: Cleanup (always runs) ────────────────────────
+        log_step(TOTAL_STEPS, f"Cleanup DSEQ {dseq}")
+        if not robust_destroy(dseq):
+            failures.append("cleanup: destroy or audit failed")
+        dseq_ref["dseq"] = None
 
     _summary(failures)
     sys.exit(1 if failures else 0)
 
 
-def _cleanup(dseq: str):
-    log_info(f"Destroying {dseq}...")
-    run(f"just destroy {dseq}", input_text="y\n", timeout=30)
+def _finish(failures: list, dseq_ref: dict):
+    """Early-exit helper that runs cleanup before summarizing."""
+    if dseq_ref.get("dseq"):
+        robust_destroy(dseq_ref["dseq"])
+        dseq_ref["dseq"] = None
+    _summary(failures)
+    sys.exit(1 if failures else 0)
 
 
 def _summary(failures: list):

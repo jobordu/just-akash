@@ -6,16 +6,26 @@ Tests the real user workflow by calling `just` targets:
   just up → just list → just status → just connect (SSH verify) → just destroy → just list
 
 Requires AKASH_API_KEY, AKASH_PROVIDERS, and SSH_PUBKEY in environment.
+AKASH_PROVIDERS_BACKUP is optional; if set, a backup-selected provider is
+also accepted by the tier-aware assertion.
 
 Usage:
     just test
 """
 
+import json
 import os
 import re
 import subprocess
 import sys
 import time
+
+from ._e2e import (
+    assert_provider_in_tiers,
+    install_signal_cleanup,
+    resolve_tiers,
+    robust_destroy,
+)
 
 GREEN = "\033[92m"
 RED = "\033[91m"
@@ -55,7 +65,7 @@ def run(cmd: str, timeout: int = 60, input_text: str | None = None) -> subproces
 
 def main():
     failures = []
-    dseq = None
+    dseq_ref: dict = {"dseq": None}
 
     print(f"\n{BOLD}{'=' * 60}{RESET}")
     print(f"{BOLD}  Akash Lifecycle Test (SSH){RESET}")
@@ -70,10 +80,14 @@ def main():
             log_fail(f"{var} not set")
             sys.exit(1)
 
-    providers = [p.strip() for p in os.environ["AKASH_PROVIDERS"].split(",") if p.strip()]
-    log_info(f"Allowed providers: {len(providers)}")
-    for p in providers:
+    preferred, backup, allowed = resolve_tiers()
+    log_info(f"Preferred providers: {len(preferred)}")
+    for p in preferred:
         log_info(f"  {p}")
+    if backup:
+        log_info(f"Backup providers: {len(backup)}")
+        for p in backup:
+            log_info(f"  {p}")
 
     ssh_key = None
     for candidate in [
@@ -86,6 +100,10 @@ def main():
         log_fail("No SSH private key found")
         sys.exit(1)
     log_pass(f"SSH key: {ssh_key}")
+
+    # Install SIGINT/SIGTERM handlers BEFORE we create the deployment so
+    # interrupts during `just up` also trigger cleanup.
+    install_signal_cleanup(dseq_ref)
 
     log_step(2, "just list — check initial state")
 
@@ -102,136 +120,135 @@ def main():
     output = r.stdout + r.stderr
     print(output)
 
+    # Try to recover DSEQ even on failure so cleanup can run.
+    m = re.search(r"DSEQ[:\s]+(\d+)", output)
+    if m:
+        dseq_ref["dseq"] = m.group(1)
+
     if r.returncode != 0:
         log_fail("just up failed")
         failures.append(f"up: exit {r.returncode}")
-        m = re.search(r"DSEQ[:\s]+(\d+)", output)
-        if m:
-            dseq = m.group(1)
-            _cleanup(dseq)
+        if dseq_ref["dseq"]:
+            robust_destroy(dseq_ref["dseq"])
         _summary(failures)
         sys.exit(1)
 
-    m = re.search(r"DSEQ[:\s]+(\d+)", output)
-    if not m:
+    if not dseq_ref["dseq"]:
         log_fail("Could not parse DSEQ from 'just up' output")
         failures.append("up: no dseq in output")
         _summary(failures)
         sys.exit(1)
 
-    dseq = m.group(1)
+    dseq = dseq_ref["dseq"]
     log_pass(f"Deployed: DSEQ={dseq}")
 
-    log_step(4, f"just status {dseq} — verify our provider")
+    # Wrap all post-deploy work in try/finally so the deployment is destroyed
+    # no matter what raises below (assertion, subprocess error, KeyboardInterrupt).
+    try:
+        log_step(4, f"just status {dseq} — verify our provider")
 
-    log_info("Waiting 10s for lease propagation...")
-    time.sleep(10)
+        log_info("Waiting 10s for lease propagation...")
+        time.sleep(10)
 
-    r = run(f"just status {dseq}")
-    status_output = r.stdout
-    print(status_output)
+        # Prefer JSON status for a clean provider extraction.
+        import contextlib
 
-    if r.returncode != 0:
-        log_fail(f"just status failed: {r.stderr.strip()}")
-        failures.append("status: failed")
-    else:
-        provider_found = False
-        for p in providers:
-            if p in status_output:
-                log_pass(f"CONFIRMED: running on OUR provider: {p}")
-                provider_found = True
-                break
-        if not provider_found:
-            log_fail("Provider not found in status output or not ours")
-            failures.append("status: foreign or missing provider")
+        provider_addr = None
+        rj = run(f"uv run just-akash status --dseq {dseq} --json", timeout=30)
+        if rj.returncode == 0:
+            with contextlib.suppress(json.JSONDecodeError, AttributeError):
+                provider_addr = json.loads(rj.stdout).get("provider")
 
-        if "ssh -p" in status_output:
-            log_pass("SSH connection info available")
-        else:
-            log_info("No SSH info in status (port may still be propagating)")
-
-    log_step(5, f"just connect {dseq} — SSH into container")
-
-    ssh_match = re.search(r"ssh -p (\d+) root@(\S+)", status_output)
-
-    if not ssh_match:
-        log_info("Retrying status for SSH details...")
-        time.sleep(5)
         r = run(f"just status {dseq}")
         status_output = r.stdout
+        print(status_output)
+
+        if r.returncode != 0:
+            log_fail(f"just status failed: {r.stderr.strip()}")
+            failures.append("status: failed")
+        else:
+            if not provider_addr:
+                # Fallback: extract from "Provider: <addr>" in TTY output.
+                pm = re.search(r"Provider:\s+(akash1\S+)", status_output)
+                provider_addr = pm.group(1) if pm else None
+
+            if not assert_provider_in_tiers(provider_addr, preferred, backup):
+                failures.append("status: foreign or missing provider")
+
+            if "ssh -p" in status_output:
+                log_pass("SSH connection info available")
+            else:
+                log_info("No SSH info in status (port may still be propagating)")
+
+        log_step(5, f"just connect {dseq} — SSH into container")
+
         ssh_match = re.search(r"ssh -p (\d+) root@(\S+)", status_output)
 
-    if not ssh_match:
-        log_fail("Could not extract SSH host:port from status")
-        failures.append("connect: no SSH endpoint")
-    else:
-        ssh_port = ssh_match.group(1)
-        ssh_host = ssh_match.group(2)
-        log_info(f"Target: {ssh_host}:{ssh_port}")
-        log_info("Probing SSH (retrying up to 3 min for sshd to start)...")
+        if not ssh_match:
+            log_info("Retrying status for SSH details...")
+            time.sleep(5)
+            r = run(f"just status {dseq}")
+            status_output = r.stdout
+            ssh_match = re.search(r"ssh -p (\d+) root@(\S+)", status_output)
 
-        connected = False
-        for attempt in range(1, 19):
-            try:
-                result = subprocess.run(
-                    [
-                        "ssh",
-                        "-o",
-                        "StrictHostKeyChecking=no",
-                        "-o",
-                        "UserKnownHostsFile=/dev/null",
-                        "-o",
-                        "ConnectTimeout=10",
-                        "-o",
-                        "BatchMode=yes",
-                        "-i",
-                        ssh_key,
-                        "-p",
-                        ssh_port,
-                        f"root@{ssh_host}",
-                        "echo akash-ssh-ok",
-                    ],
-                    capture_output=True,
-                    text=True,
-                    timeout=15,
-                )
-                if "akash-ssh-ok" in result.stdout:
-                    connected = True
-                    break
-            except (subprocess.TimeoutExpired, OSError):
-                pass
-            print(f"\r  SSH attempt {attempt}/18 — waiting for sshd...", end="", flush=True)
-            time.sleep(10)
-        print()
-
-        if connected:
-            log_pass(f"SSH connection to {ssh_host}:{ssh_port} SUCCEEDED")
+        if not ssh_match:
+            log_fail("Could not extract SSH host:port from status")
+            failures.append("connect: no SSH endpoint")
         else:
-            log_fail("SSH connection FAILED after 18 attempts")
-            failures.append(f"connect: SSH failed to {ssh_host}:{ssh_port}")
+            ssh_port = ssh_match.group(1)
+            ssh_host = ssh_match.group(2)
+            log_info(f"Target: {ssh_host}:{ssh_port}")
+            log_info("Probing SSH (retrying up to 3 min for sshd to start)...")
 
-    log_step(6, f"just destroy {dseq} — stop instance")
+            connected = False
+            for attempt in range(1, 19):
+                try:
+                    result = subprocess.run(
+                        [
+                            "ssh",
+                            "-o",
+                            "StrictHostKeyChecking=no",
+                            "-o",
+                            "UserKnownHostsFile=/dev/null",
+                            "-o",
+                            "ConnectTimeout=10",
+                            "-o",
+                            "BatchMode=yes",
+                            "-i",
+                            ssh_key,
+                            "-p",
+                            ssh_port,
+                            f"root@{ssh_host}",
+                            "echo akash-ssh-ok",
+                        ],
+                        capture_output=True,
+                        text=True,
+                        timeout=15,
+                    )
+                    if "akash-ssh-ok" in result.stdout:
+                        connected = True
+                        break
+                except (subprocess.TimeoutExpired, OSError):
+                    pass
+                print(f"\r  SSH attempt {attempt}/18 — waiting for sshd...", end="", flush=True)
+                time.sleep(10)
+            print()
 
-    r = run(f"just destroy {dseq}", input_text="y\n")
-    output = r.stdout + r.stderr
-    print(output.strip())
+            if connected:
+                log_pass(f"SSH connection to {ssh_host}:{ssh_port} SUCCEEDED")
+            else:
+                log_fail("SSH connection FAILED after 18 attempts")
+                failures.append(f"connect: SSH failed to {ssh_host}:{ssh_port}")
+    finally:
+        log_step(6, f"Cleanup: destroy {dseq}")
+        if not robust_destroy(dseq):
+            failures.append("cleanup: destroy or audit failed")
+        # Once destroyed, drop the ref so the SIGINT handler doesn't double-destroy.
+        dseq_ref["dseq"] = None
 
-    if r.returncode != 0:
-        log_fail(f"just destroy failed: {r.stderr.strip()}")
-        failures.append("down: failed")
-    elif "closed" in output.lower():
-        log_pass(f"Deployment {dseq} closed")
-    else:
-        log_fail("Unexpected down output")
-        failures.append("down: unexpected output")
-
-    log_step(7, "just list — verify instance is gone")
-
-    time.sleep(3)
+    log_step(7, "just list — final audit")
     r = run("just list")
-    ls_output = r.stdout
-
-    if dseq not in ls_output:
+    if dseq not in r.stdout:
         log_pass(f"Deployment {dseq} no longer in list")
     else:
         log_fail(f"Deployment {dseq} still in list")
@@ -239,11 +256,6 @@ def main():
 
     _summary(failures)
     sys.exit(1 if failures else 0)
-
-
-def _cleanup(dseq: str):
-    log_info(f"Cleaning up {dseq}...")
-    run(f"just destroy {dseq}", input_text="y\n", timeout=30)
 
 
 def _summary(failures: list):
