@@ -1,0 +1,228 @@
+"""Shared helpers for e2e test scripts.
+
+Centralizes:
+  - tier resolution from env (preferred ∪ backup) for provider verification
+  - leak-proof cleanup: SIGINT/SIGTERM handler + retry-on-fail destroy + post-destroy audit
+
+These helpers are imported by just_akash/test_lifecycle.py, test_secrets_e2e.py,
+and test_shell_e2e.py. Keeping them here ensures all three e2e tests share the
+same "no deployment leak" behavior — if any one diverges, that's a bug to fix
+here, not by patching three call sites.
+"""
+
+import os
+import re
+import signal
+import subprocess
+import sys
+import time
+
+GREEN = "\033[92m"
+RED = "\033[91m"
+YELLOW = "\033[93m"
+RESET = "\033[0m"
+
+# Refs registered by install_signal_cleanup. The signal handler iterates this
+# list so multiple deployments — created sequentially in the same process —
+# are ALL cleaned up on interrupt. Without this, the second install() would
+# replace the first handler and orphan the first deployment.
+_REGISTERED_DSEQ_REFS: list[dict] = []
+_SIGNAL_HANDLERS_INSTALLED = False
+# Reentrancy guard. An impatient user double-Ctrl-C-ing during cleanup would
+# otherwise re-enter _signal_handler recursively and re-destroy every
+# registered ref once per re-entry level. The guard makes re-entry a no-op:
+# the first signal "wins" and is allowed to finish (or be hard-killed).
+_HANDLER_RUNNING = False
+
+
+def _info(msg: str) -> None:
+    print(f"  {YELLOW}INFO{RESET} {msg}")
+
+
+def _pass(msg: str) -> None:
+    print(f"  {GREEN}PASS{RESET} {msg}")
+
+
+def _fail(msg: str) -> None:
+    print(f"  {RED}FAIL{RESET} {msg}")
+
+
+def resolve_tiers() -> tuple[list[str], list[str], list[str]]:
+    """Return (preferred, backup, union) parsed from env vars."""
+    pref = [p.strip() for p in os.environ.get("AKASH_PROVIDERS", "").split(",") if p.strip()]
+    backup = [
+        p.strip() for p in os.environ.get("AKASH_PROVIDERS_BACKUP", "").split(",") if p.strip()
+    ]
+    return pref, backup, pref + backup
+
+
+def classify_provider(provider: str, preferred: list[str], backup: list[str]) -> str:
+    """Tag a provider as 'preferred' / 'backup' / 'foreign' / 'unknown'."""
+    if not provider:
+        return "unknown"
+    if provider in preferred:
+        return "preferred"
+    if provider in backup:
+        return "backup"
+    return "foreign"
+
+
+def assert_provider_in_tiers(
+    provider: str | None, preferred: list[str], backup: list[str]
+) -> bool:
+    """Log + return whether `provider` is in the configured tiered allowlist.
+
+    Returns True on hit (preferred OR backup), False on miss.  Also returns True
+    when no allowlist is configured (preferred and backup both empty), since the
+    deploy.py state machine accepts any provider in that case.
+    """
+    if not preferred and not backup:
+        _info("No allowlist configured — any provider accepted (skip tier check)")
+        return True
+    tier = classify_provider(provider or "", preferred, backup)
+    if tier == "preferred":
+        _pass(f"selected provider {provider} is PREFERRED ({len(preferred)} configured)")
+        return True
+    if tier == "backup":
+        _info(
+            f"selected provider {provider} is BACKUP ({len(backup)} configured) "
+            "— preferred tier was unresponsive"
+        )
+        return True
+    _fail(
+        f"selected provider {provider!r} is NOT in any tier — "
+        f"preferred={preferred} backup={backup}"
+    )
+    return False
+
+
+def _run(
+    cmd: str, *, timeout: int = 60, input_text: str | None = None
+) -> subprocess.CompletedProcess:
+    return subprocess.run(
+        cmd,
+        shell=True,
+        capture_output=True,
+        text=True,
+        timeout=timeout,
+        input=input_text,
+    )
+
+
+def _dseq_in_list_output(dseq: str, output: str) -> bool:
+    """Word-boundary check for DSEQ in `just list` output.
+
+    Plain substring matching is unsafe: dseq="123" would falsely match a
+    different deployment "12345". DSEQs are numeric tokens; require a word
+    boundary on both sides so "123" doesn't match "12345" but does match
+    "dseq=123 active" or "12345 closed\n123 active".
+    """
+    if not dseq:
+        return False
+    return re.search(rf"(?<!\d){re.escape(dseq)}(?!\d)", output) is not None
+
+
+def robust_destroy(dseq: str, *, retries: int = 2, audit: bool = True) -> bool:
+    """Destroy a deployment with retry-on-fail and post-destroy audit.
+
+    Returns True if the deployment is confirmed gone, False otherwise.  Safe to
+    call from a signal handler or a finally block — never raises.
+    """
+    if not dseq:
+        return True
+    # Clamp negative retries so a caller mistake (or signal-handler default
+    # of retries=1 minus a typo) never silently skips the destroy loop. Empty
+    # range with retries<0 used to issue ZERO destroy commands but still
+    # return True from the audit — a silent leak. Clamp to 0 (one attempt).
+    retries = max(retries, 0)
+    last_err = ""
+    for attempt in range(1, retries + 2):
+        try:
+            r = _run(f"just destroy {dseq}", input_text="y\n", timeout=60)
+            if r.returncode == 0 and "closed" in (r.stdout + r.stderr).lower():
+                _pass(f"Deployment {dseq} closed (attempt {attempt})")
+                break
+            last_err = (r.stderr or r.stdout).strip()
+            _fail(f"destroy attempt {attempt} failed: {last_err[:200]}")
+        except Exception as e:  # noqa: BLE001 — must not raise from cleanup
+            last_err = str(e)
+            _fail(f"destroy attempt {attempt} raised: {e}")
+        if attempt <= retries:
+            time.sleep(3)
+    if not audit:
+        return True
+    # Audit: confirm DSEQ is no longer in `just list`. Use word-boundary
+    # match so dseq="123" doesn't false-positive against an unrelated "12345".
+    try:
+        time.sleep(2)
+        r = _run("just list", timeout=30)
+        if not _dseq_in_list_output(dseq, r.stdout):
+            _pass(f"Audit: deployment {dseq} no longer listed")
+            return True
+        _fail(f"Audit: deployment {dseq} STILL listed after destroy — manual cleanup required")
+        return False
+    except Exception as e:  # noqa: BLE001
+        _fail(f"Audit failed: {e}")
+        return False
+
+
+def _signal_handler(signum, _frame):
+    """Single shared handler — destroys EVERY registered dseq_ref.
+
+    Multiple deployments in one process (sequential or parallel test scripts)
+    each call install_signal_cleanup; we accumulate their refs so an interrupt
+    cleans them all. Without this, the second install replaces the handler
+    and the first deployment leaks.
+
+    Reentrancy: a second signal that arrives while the first is still cleaning
+    up is a no-op. The first signal "wins". Without this guard a double-Ctrl-C
+    would recursively re-iterate the registry, multiplying destroy calls.
+    """
+    global _HANDLER_RUNNING
+    if _HANDLER_RUNNING:
+        # Already cleaning up. Don't re-iterate; let the first signal finish.
+        return
+    _HANDLER_RUNNING = True
+    try:
+        sig_name = signal.Signals(signum).name
+        print(f"\n  {RED}INTERRUPTED{RESET} ({sig_name}) — running cleanup...")
+        cleaned_any = False
+        for ref in list(_REGISTERED_DSEQ_REFS):
+            dseq = (ref or {}).get("dseq") or ""
+            if dseq:
+                robust_destroy(dseq, retries=1, audit=True)
+                cleaned_any = True
+        if not cleaned_any:
+            _info("No DSEQ recorded yet — nothing to clean up")
+    finally:
+        _HANDLER_RUNNING = False
+    sys.exit(130)
+
+
+def install_signal_cleanup(dseq_ref: dict) -> None:
+    """Register a dseq_ref for SIGINT/SIGTERM-driven cleanup.
+
+    `dseq_ref` is a mutable dict: tests update `dseq_ref['dseq']` once the
+    deployment is created so the handler knows what to clean up.  Call this
+    BEFORE creating the deployment so signals during `just up` are also caught.
+
+    Idempotent: re-installing with a NEW dseq_ref appends it to the registry
+    rather than replacing the previous handler. All registered refs are
+    cleaned up on a single signal — no leaked deployment from an earlier
+    install_signal_cleanup call.
+    """
+    global _SIGNAL_HANDLERS_INSTALLED
+    if dseq_ref not in _REGISTERED_DSEQ_REFS:
+        _REGISTERED_DSEQ_REFS.append(dseq_ref)
+    if not _SIGNAL_HANDLERS_INSTALLED:
+        signal.signal(signal.SIGINT, _signal_handler)
+        signal.signal(signal.SIGTERM, _signal_handler)
+        _SIGNAL_HANDLERS_INSTALLED = True
+
+
+def _reset_signal_cleanup_for_tests() -> None:
+    """Test-only helper: clear registry + handler-installed flag between tests."""
+    _REGISTERED_DSEQ_REFS.clear()
+    global _SIGNAL_HANDLERS_INSTALLED, _HANDLER_RUNNING
+    _SIGNAL_HANDLERS_INSTALLED = False
+    _HANDLER_RUNNING = False

@@ -375,8 +375,11 @@ def _extract_provider(bid: dict[str, Any]) -> str | None:
 
 
 def _extract_bid_price(bid: dict[str, Any]) -> tuple:
+    # Display-only fallback denom for malformed bids that omit `denom`. The
+    # real denom comes from the bid response when present. Default to BME-era
+    # `uact`; legacy `uakt` is no longer canonical.
     if not isinstance(bid, dict):
-        return (float("inf"), "uakt")
+        return (float("inf"), "uact")
     nested = bid.get("bid", {})
     nested_price = nested.get("price", {}) if isinstance(nested, dict) else {}
     price = bid.get("price", nested_price)
@@ -386,12 +389,12 @@ def _extract_bid_price(bid: dict[str, Any]) -> tuple:
             amount = float(raw_amount)
         except (TypeError, ValueError):
             amount = float("inf")
-        denom = price.get("denom", "uakt")
+        denom = price.get("denom", "uact")
         return (amount, denom)
     try:
-        return (float(price) if price else float("inf"), "uakt")
+        return (float(price) if price else float("inf"), "uact")
     except (TypeError, ValueError):
-        return (float("inf"), "uakt")
+        return (float("inf"), "uact")
 
 
 def _find_ssh_key(explicit_key: str = "") -> str | None:

@@ -266,7 +266,32 @@ class TestCliDeployPassesArgs:
             bid_wait=30,
             bid_wait_retry=60,
             env_vars=[],
+            preferred_providers=None,
+            backup_providers=None,
         )
+
+    @patch("just_akash.deploy.deploy")
+    def test_deploy_passes_provider_tier_args(self, mock_deploy, monkeypatch):
+        with pytest.raises(SystemExit) as exc_info:
+            _run_cli(
+                monkeypatch,
+                [
+                    "just-akash",
+                    "deploy",
+                    "--sdl",
+                    "my.yaml",
+                    "--provider",
+                    "akash1pref1",
+                    "--provider",
+                    "akash1pref2",
+                    "--backup-provider",
+                    "akash1back1",
+                ],
+            )
+        assert exc_info.value.code == 0
+        kwargs = mock_deploy.call_args.kwargs
+        assert kwargs["preferred_providers"] == ["akash1pref1", "akash1pref2"]
+        assert kwargs["backup_providers"] == ["akash1back1"]
 
 
 class TestCliConnect:

@@ -20,6 +20,13 @@ import sys
 import tempfile
 import time
 
+from ._e2e import (
+    assert_provider_in_tiers,
+    install_signal_cleanup,
+    resolve_tiers,
+    robust_destroy,
+)
+
 GREEN = "\033[92m"
 RED = "\033[91m"
 YELLOW = "\033[93m"
@@ -58,7 +65,7 @@ def run(cmd: str, timeout: int = 60, input_text: str | None = None) -> subproces
 
 def main():
     failures = []
-    dseq = None
+    dseq_ref: dict = {"dseq": None}
 
     print(f"\n{BOLD}{'=' * 60}{RESET}")
     print(f"{BOLD}  Akash Lease-Shell E2E Test{RESET}")
@@ -74,6 +81,9 @@ def main():
 
     log_pass("All required env vars are set")
 
+    preferred, backup, _ = resolve_tiers()
+    install_signal_cleanup(dseq_ref)
+
     # ── Step 2: Deploy via `just up` ─────────────────────────
     log_step(2, "Deploy via `just up`")
 
@@ -81,32 +91,43 @@ def main():
     output = r.stdout + r.stderr
     print(output)
 
+    m = re.search(r"DSEQ[:\s]+(\d+)", output)
+    if m:
+        dseq_ref["dseq"] = m.group(1)
+
     if r.returncode != 0:
         log_fail(f"just up failed (rc={r.returncode})")
+        if dseq_ref["dseq"]:
+            robust_destroy(dseq_ref["dseq"])
         sys.exit(1)
 
-    m = re.search(r"DSEQ[:\s]+(\d+)", output)
-    if not m:
+    if not dseq_ref["dseq"]:
         log_fail("Could not parse DSEQ from `just up` output")
         sys.exit(1)
 
-    dseq = m.group(1)
+    dseq = dseq_ref["dseq"]
     log_pass(f"Deployed DSEQ={dseq}")
 
     # ── Steps 3-5 with cleanup guarantee ─────────────────────
     try:
-        # ── Step 3: Poll for lease readiness ─────────────────
-        log_step(3, f"Wait for lease readiness (DSEQ={dseq})")
+        # ── Step 3: Poll for lease readiness + verify provider tier ───
+        log_step(3, f"Wait for lease readiness + verify provider tier (DSEQ={dseq})")
 
         log_info("Waiting 10s for lease propagation...")
         time.sleep(10)
 
         lease_ready = False
+        provider_addr = None
         for attempt in range(1, 6):
-            r = run(f"uv run just-akash status --dseq {dseq}", timeout=30)
-            if "endpoint" in r.stdout or "ssh_host" in r.stdout or "ready" in r.stdout:
-                lease_ready = True
-                break
+            r = run(f"uv run just-akash status --dseq {dseq} --json", timeout=30)
+            try:
+                status_data = json.loads(r.stdout)
+                provider_addr = status_data.get("provider")
+                if status_data.get("status") == "ready" or status_data.get("ssh_host"):
+                    lease_ready = True
+                    break
+            except (json.JSONDecodeError, TypeError):
+                pass
             if attempt < 5:
                 log_info(f"Attempt {attempt}/5 — lease not ready yet, retrying in 5s...")
                 time.sleep(5)
@@ -116,6 +137,9 @@ def main():
             log_fail("Lease not active after 35 seconds")
         else:
             log_pass("Lease is active and ready")
+
+        if not assert_provider_in_tiers(provider_addr, preferred, backup):
+            failures.append("status: foreign or missing provider")
 
         # ── Step 4: exec via lease-shell ─────────────────────
         log_step(4, f"exec: echo hello from lease-shell (DSEQ={dseq})")
@@ -270,15 +294,12 @@ def main():
         log_fail(f"Unexpected error: {e}")
         failures.append(str(e))
     finally:
-        # ── Step 7: Cleanup ───────────────────────────────────
+        # ── Step 7: Cleanup (always runs, with retry + audit) ──────
         if dseq:
             log_step(TOTAL_STEPS, f"Cleanup: destroy DSEQ={dseq}")
-            r = run(f"just destroy {dseq}", timeout=60)
-            if r.returncode == 0:
-                log_pass("Destroyed")
-            else:
-                log_fail(f"destroy failed:\n{r.stderr}")
+            if not robust_destroy(dseq):
                 failures.append("destroy_failed")
+            dseq_ref["dseq"] = None
 
     print(f"\n{BOLD}{'=' * 60}{RESET}")
     if failures:

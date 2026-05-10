@@ -114,13 +114,16 @@ def main():
     deploy_p.add_argument("--gpu", action="store_true", help="Use GPU variant SDL")
     deploy_p.add_argument("--image", default=None, help="Override container image")
     deploy_p.add_argument(
-        "--bid-wait", type=int, default=60, help="Seconds to wait for bids (default: 60)"
+        "--bid-wait",
+        type=int,
+        default=60,
+        help="Phase 1 (preferred-only) window seconds (default: 60)",
     )
     deploy_p.add_argument(
         "--bid-wait-retry",
         type=int,
         default=120,
-        help="Seconds to retry if no bids (default: 120)",
+        help="Phase 2 (preferred-grace) window seconds (default: 120)",
     )
     deploy_p.add_argument(
         "--env",
@@ -128,6 +131,20 @@ def main():
         dest="deploy_env_vars",
         default=[],
         help="KEY=VALUE env var to inject into SDL (repeatable, provider-visible)",
+    )
+    deploy_p.add_argument(
+        "--provider",
+        action="append",
+        dest="preferred_providers",
+        default=None,
+        help="Preferred provider address (repeatable; overrides AKASH_PROVIDERS)",
+    )
+    deploy_p.add_argument(
+        "--backup-provider",
+        action="append",
+        dest="backup_providers",
+        default=None,
+        help="Backup provider address (repeatable; overrides AKASH_PROVIDERS_BACKUP)",
     )
 
     # ── connect ────────────────────────────────────────
@@ -248,6 +265,8 @@ def main():
                 bid_wait=args.bid_wait,
                 bid_wait_retry=args.bid_wait_retry,
                 env_vars=args.deploy_env_vars,
+                preferred_providers=args.preferred_providers,
+                backup_providers=args.backup_providers,
             )
             sys.exit(0)
         except RuntimeError as e:

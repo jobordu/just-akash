@@ -750,7 +750,7 @@ class TestExtractBidPriceListPrice:
         bid = {"price": [100, "uakt"]}
         amount, denom = _extract_bid_price(bid)
         assert amount == float("inf")
-        assert denom == "uakt"
+        assert denom == "uact"
 
     def test_price_is_dict_with_list_amount(self):
         bid = {"price": {"amount": [100], "denom": "uakt"}}
@@ -1326,12 +1326,12 @@ class TestExtractBidPriceNonDictBidNested:
     def test_bid_nested_is_string(self):
         bid = {"bid": "not_a_dict"}
         amount, denom = _extract_bid_price(bid)
-        assert denom == "uakt"
+        assert denom == "uact"
 
     def test_bid_nested_is_int(self):
         bid = {"bid": 42}
         amount, denom = _extract_bid_price(bid)
-        assert denom == "uakt"
+        assert denom == "uact"
 
 
 class TestDeployBidPollingNonDictBid:
