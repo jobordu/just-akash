@@ -4,12 +4,12 @@ Justfile recipes + Python CLI for deploying on [Akash Network](https://akash.net
 
 Self-contained — clone, configure `.env`, and run.
 
-## What's New in v1.5.0
+## What's New in v1.6.0
 
-- **Lease-shell transport** — exec and inject via WebSocket proxy (`wss://console.akash.network/provider-proxy-mainnet`), **no SSH required**
-- **Dual transport** — `--transport lease-shell` (default) or `--transport ssh` on every `exec`/`inject`/`connect` command
-- **514 tests** with 68% coverage
-- **CI pipeline** — ruff lint, ruff format, pyright typecheck, unit tests, E2E lease-shell test, E2E secrets test
+- **Tiered provider selection** — preferred + backup allowlists with a 3-phase bid-selection state machine (`AKASH_PROVIDERS_BACKUP` env var, `--provider` / `--backup-provider` CLI flags). See [Bid Selection](#bid-selection).
+- **BME migration** — bid-price denom defaults updated from `uakt` (legacy) to `uact`.
+- **Hardened e2e cleanup** — `robust_destroy()` with retry + audit, SIGINT/SIGTERM-safe handler, no-leak guarantee on multi-deployment runs.
+- **653 tests** (109 new); `just_akash/deploy.py` and `just_akash/_e2e.py` at 100% line coverage.
 
 ## Prerequisites
 

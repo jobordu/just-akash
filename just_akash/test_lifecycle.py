@@ -248,7 +248,9 @@ def main():
 
     log_step(7, "just list — final audit")
     r = run("just list")
-    if dseq not in r.stdout:
+    # Word-boundary match: don't false-positive when our dseq is a substring
+    # of another active deployment (e.g. "123" inside "12345").
+    if not re.search(rf"(?<!\d){re.escape(dseq)}(?!\d)", r.stdout):
         log_pass(f"Deployment {dseq} no longer in list")
     else:
         log_fail(f"Deployment {dseq} still in list")

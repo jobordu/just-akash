@@ -114,13 +114,16 @@ def main():
     deploy_p.add_argument("--gpu", action="store_true", help="Use GPU variant SDL")
     deploy_p.add_argument("--image", default=None, help="Override container image")
     deploy_p.add_argument(
-        "--bid-wait", type=int, default=60, help="Seconds to wait for bids (default: 60)"
+        "--bid-wait",
+        type=int,
+        default=60,
+        help="Phase 1 (preferred-only) window seconds (default: 60)",
     )
     deploy_p.add_argument(
         "--bid-wait-retry",
         type=int,
         default=120,
-        help="Seconds to retry if no bids (default: 120)",
+        help="Phase 2 (preferred-grace) window seconds (default: 120)",
     )
     deploy_p.add_argument(
         "--env",

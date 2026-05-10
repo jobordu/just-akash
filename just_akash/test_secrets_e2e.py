@@ -367,11 +367,14 @@ def main():
         else:
             log_info("Skipping cross-check (inject failed)")
     finally:
-        # ── Step 7: Cleanup (always runs) ────────────────────────
-        log_step(TOTAL_STEPS, f"Cleanup DSEQ {dseq}")
-        if not robust_destroy(dseq):
-            failures.append("cleanup: destroy or audit failed")
-        dseq_ref["dseq"] = None
+        # ── Step 7: Cleanup (always runs, idempotent) ─────────────
+        # If _finish() already cleaned up via early-exit, dseq_ref["dseq"]
+        # is None — skip to avoid double-destroy.
+        if dseq_ref.get("dseq"):
+            log_step(TOTAL_STEPS, f"Cleanup DSEQ {dseq}")
+            if not robust_destroy(dseq):
+                failures.append("cleanup: destroy or audit failed")
+            dseq_ref["dseq"] = None
 
     _summary(failures)
     sys.exit(1 if failures else 0)
