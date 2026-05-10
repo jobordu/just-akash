@@ -50,9 +50,7 @@ def _fmt_price(bid) -> str:
     return f"{amount} {denom}"
 
 
-def _classify_bid(
-    provider: str | None, preferred: list[str], backup: list[str]
-) -> str:
+def _classify_bid(provider: str | None, preferred: list[str], backup: list[str]) -> str:
     """Tag a bid by tier. With no allowlist set, every bid is ACCEPTED.
     Accepts None (a malformed bid with no provider field) — classified as
     FOREIGN when an allowlist is configured, ACCEPTED otherwise.
